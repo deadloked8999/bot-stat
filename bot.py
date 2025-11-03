@@ -543,25 +543,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state.mode = 'awaiting_date'
         return
     
-    # Блочный ввод данных
+    # Блочный ввод данных (но проверяем сначала - это не команда/кнопка!)
     if state.mode in ['нал', 'безнал']:
-        # Парсим введенные данные
-        successful, errors = DataParser.parse_block(text)
+        # Проверяем - это команда или кнопка?
+        # Если текст начинается с emoji кнопок или это известная команда - НЕ парсим как данные
+        emoji_buttons = ['📥', '✅', '❌', '📊', '💰', '📋', '📤', '✏️', '🗑️', '❓', '🚪']
+        is_button = any(text.startswith(emoji) for emoji in emoji_buttons)
         
-        if successful:
-            # Сохраняем в соответствующий список
-            if state.mode == 'нал':
-                state.temp_nal_data.extend(successful)
-            else:
-                state.temp_beznal_data.extend(successful)
-        
-        if errors:
-            error_msg = "⚠️ Ошибки при парсинге:\n" + '\n'.join(errors[:5])
-            if len(errors) > 5:
-                error_msg += f"\n... и ещё {len(errors) - 5} ошибок"
-            await update.message.reply_text(error_msg)
-        
-        return
+        if is_button or text_lower in ['отмена', 'готово', 'отчет', 'список', 'экспорт', 'помощь']:
+            # Это команда/кнопка - НЕ парсим как данные, пропускаем дальше
+            pass
+        else:
+            # Это данные - парсим
+            successful, errors = DataParser.parse_block(text)
+            
+            if successful:
+                # Сохраняем в соответствующий список
+                if state.mode == 'нал':
+                    state.temp_nal_data.extend(successful)
+                else:
+                    state.temp_beznal_data.extend(successful)
+            
+            if errors:
+                error_msg = "⚠️ Ошибки при парсинге:\n" + '\n'.join(errors[:5])
+                if len(errors) > 5:
+                    error_msg += f"\n... и ещё {len(errors) - 5} ошибок"
+                await update.message.reply_text(error_msg)
+            
+            return
     
     # Команда "отчет"
     if text_lower == 'отчет':
