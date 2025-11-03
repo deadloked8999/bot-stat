@@ -41,6 +41,9 @@ AUTHORIZED_USERS = set()
 # Пин-код для доступа
 PIN_CODE = "1664"
 
+# Пин-код для удаления всех данных
+RESET_PIN_CODE = "6002147"
+
 
 class UserState:
     """Класс для хранения состояния пользователя"""
@@ -171,6 +174,94 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
         return
     
+    # ЖЁСТКАЯ ВОРОНКА: если пользователь в режиме ожидания даты после "готово"
+    if state.mode == 'awaiting_date':
+        if text_lower == 'отмена':
+            state.reset_input()
+            await update.message.reply_text(
+                "❌ Ввод данных отменён. Данные не сохранены.\n"
+                "Начните заново: нал / безнал"
+            )
+            return
+        
+        # Пытаемся распарсить дату
+        success, parsed_date, error = parse_short_date(text)
+        if success:
+            # Сохраняем данные (код уже есть ниже)
+            saved_count = 0
+            
+            for item in state.temp_nal_data:
+                db.add_or_update_operation(
+                    club=state.club,
+                    date=parsed_date,
+                    code=item['code'],
+                    name=item['name'],
+                    channel='нал',
+                    amount=item['amount'],
+                    original_line=item['original_line'],
+                    aggregate=True
+                )
+                saved_count += 1
+            
+            for item in state.temp_beznal_data:
+                db.add_or_update_operation(
+                    club=state.club,
+                    date=parsed_date,
+                    code=item['code'],
+                    name=item['name'],
+                    channel='безнал',
+                    amount=item['amount'],
+                    original_line=item['original_line'],
+                    aggregate=True
+                )
+                saved_count += 1
+            
+            state.reset_input()
+            
+            await update.message.reply_text(
+                f"✅ Сохранено: клуб {state.club}, дата {parsed_date}\n"
+                f"Записей: {saved_count}"
+            )
+            return
+        else:
+            await update.message.reply_text(
+                f"❌ {error}\n\n"
+                f"Введите дату (формат: 30,10) или напишите: отмена"
+            )
+            return
+    
+    # Команда "обнулить"
+    if text_lower == 'обнулить':
+        await update.message.reply_text(
+            "⚠️ ВНИМАНИЕ! Будут удалены ВСЕ данные из базы!\n\n"
+            "Для подтверждения введите пин-код:"
+        )
+        state.mode = 'awaiting_reset_pin'
+        return
+    
+    # Обработка пина для обнуления
+    if state.mode == 'awaiting_reset_pin':
+        if text == RESET_PIN_CODE:
+            # Удаляем все данные
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM operations")
+            cursor.execute("DELETE FROM edit_log")
+            conn.commit()
+            conn.close()
+            
+            state.mode = None
+            await update.message.reply_text(
+                "✅ Все данные удалены из базы.\n"
+                "База данных обнулена."
+            )
+        else:
+            state.mode = None
+            await update.message.reply_text(
+                "❌ Неверный пин-код. Операция отменена."
+            )
+        return
+    
     # Команда "помощь"
     if text_lower in ['помощь', 'help']:
         await update.message.reply_text(
@@ -180,7 +271,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💰 ВВОД ДАННЫХ:\n"
             "• нал - ввод НАЛ\n"
             "• безнал - ввод БЕЗНАЛ\n"
-            "• готово - завершить ввод, указать дату и сохранить\n\n"
+            "• готово - завершить ввод, указать дату и сохранить\n"
+            "• отмена - отменить текущий ввод\n\n"
             "📊 ОТЧЁТЫ:\n"
             "• отчет - получить отчёт (выбор клуба + период)\n"
             "• выплаты КОД период - выплаты сотруднику\n\n"
@@ -190,6 +282,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• удалить КОД дата - удалить данные сотрудника\n\n"
             "📤 ЭКСПОРТ:\n"
             "• экспорт - экспортировать отчёт в Excel\n\n"
+            "🗑️ ОЧИСТКА:\n"
+            "• обнулить - удалить ВСЕ данные (требует пин)\n\n"
             "📖 ФОРМАТЫ:\n"
             "• Дата: 30,10 или 30.10\n"
             "• Период: 10,06-11,08\n"
@@ -197,8 +291,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Проверка воронок (пользователь не может переключиться пока не завершит)
+    active_modes = [
+        'awaiting_date', 'awaiting_edit_data', 'awaiting_delete_choice',
+        'awaiting_report_club', 'awaiting_report_period',
+        'awaiting_export_club', 'awaiting_export_period',
+        'awaiting_merge_confirm', 'awaiting_reset_pin'
+    ]
+    
+    if state.mode in active_modes and text_lower == 'отмена':
+        state.mode = None
+        state.reset_input()
+        await update.message.reply_text(
+            "❌ Операция отменена.\n"
+            "Введите команду заново или напишите: помощь"
+        )
+        return
+    
     # Команда "старт москвич" или "старт анора" (обработка как текст)
     if text_lower.startswith('старт'):
+        # Если в режиме ввода данных - предупреждение
+        if state.has_data() and state.mode != 'awaiting_date':
+            await update.message.reply_text(
+                "⚠️ У вас есть несохранённые данные!\n"
+                "Завершите ввод командой: готово\n"
+                "Или отмените: отмена"
+            )
+            return
         await start_command(update, context)
         return
     
@@ -275,51 +394,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Переходим в режим ожидания даты
         state.mode = 'awaiting_date'
-        return
-    
-    # Обработка ввода даты после команды "готово"
-    if state.mode == 'awaiting_date':
-        success, parsed_date, error = parse_short_date(text)
-        if not success:
-            await update.message.reply_text(f"❌ {error}")
-            return
-        
-        # Сохраняем все данные в БД
-        saved_count = 0
-        
-        for item in state.temp_nal_data:
-            db.add_or_update_operation(
-                club=state.club,
-                date=parsed_date,
-                code=item['code'],
-                name=item['name'],
-                channel='нал',
-                amount=item['amount'],
-                original_line=item['original_line'],
-                aggregate=True
-            )
-            saved_count += 1
-        
-        for item in state.temp_beznal_data:
-            db.add_or_update_operation(
-                club=state.club,
-                date=parsed_date,
-                code=item['code'],
-                name=item['name'],
-                channel='безнал',
-                amount=item['amount'],
-                original_line=item['original_line'],
-                aggregate=True
-            )
-            saved_count += 1
-        
-        # Очищаем состояние
-        state.reset_input()
-        
-        await update.message.reply_text(
-            f"✅ Сохранено: клуб {state.club}, дата {parsed_date}\n"
-            f"Записей: {saved_count}"
-        )
         return
     
     # Блочный ввод данных
