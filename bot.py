@@ -146,12 +146,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Проверка авторизации
     if user_id not in AUTHORIZED_USERS:
-        await update.message.reply_text("🔒 Введите пин-код для доступа:")
+        await update.message.reply_text(
+            "🔒 Введите пин-код для доступа:",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
     
     state = get_user_state(user_id)
     
-    text = update.message.text.lower()
+    # Получаем текст команды
+    if update.message:
+        text = update.message.text.lower()
+    else:
+        text = ""
     
     # Определяем клуб
     club = None
@@ -193,9 +200,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             AUTHORIZED_USERS.add(user_id)
             await update.message.reply_text(
                 "✅ Доступ разрешён!\n\n"
-                "Используйте команды:\n"
-                "• старт москвич\n"
-                "• старт анора"
+                "Выберите клуб:",
+                reply_markup=get_club_keyboard()
             )
         else:
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
@@ -247,7 +253,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_text(
                 f"✅ Сохранено: клуб {state.club}, дата {parsed_date}\n"
-                f"Записей: {saved_count}"
+                f"Записей: {saved_count}",
+                reply_markup=get_main_keyboard()
             )
             return
         else:
@@ -309,6 +316,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text_lower in button_commands:
         text_lower = button_commands[text_lower]
     
+    # Команда "кнопки" - показать клавиатуру
+    if text_lower == 'кнопки':
+        if state.club:
+            await update.message.reply_text(
+                "Клавиатура:",
+                reply_markup=get_main_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                "Сначала выберите клуб:",
+                reply_markup=get_club_keyboard()
+            )
+        return
+    
     # Команда "помощь"
     if text_lower in ['помощь', 'help']:
         await update.message.reply_text(
@@ -351,7 +372,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state.reset_input()
         await update.message.reply_text(
             "❌ Операция отменена.\n"
-            "Введите команду заново или напишите: помощь"
+            "Введите команду заново или напишите: помощь",
+            reply_markup=get_main_keyboard() if state.club else ReplyKeyboardRemove()
         )
         return
     
@@ -527,18 +549,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Команда "выплаты"
-    if text_lower.startswith('выплаты'):
-        await handle_payments_command(update, context, state, text)
+    if text_lower.startswith('выплаты') or text_lower == 'выплаты':
+        if text_lower == 'выплаты':
+            # Нажата кнопка - просим ввести параметры
+            await update.message.reply_text(
+                "Формат: выплаты КОД период\n\n"
+                "Примеры:\n"
+                "• выплаты Д7 12,12\n"
+                "• выплаты Д7 10,06-11,08"
+            )
+        else:
+            await handle_payments_command(update, context, state, text)
         return
     
     # Команда "список"
-    if text_lower.startswith('список'):
-        await handle_list_command(update, context, state, text)
+    if text_lower.startswith('список') or text_lower == 'список':
+        if text_lower == 'список':
+            await update.message.reply_text(
+                "Формат: список дата\n\n"
+                "Примеры:\n"
+                "• список 12,12\n"
+                "• список 30,10"
+            )
+        else:
+            await handle_list_command(update, context, state, text)
         return
     
     # Команда "исправить"
-    if text_lower.startswith('исправить'):
-        await handle_edit_command_new(update, context, state, text)
+    if text_lower.startswith('исправить') or text_lower == 'исправить':
+        if text_lower == 'исправить':
+            await update.message.reply_text(
+                "Формат: исправить КОД дата\n\n"
+                "Примеры:\n"
+                "• исправить Д7 12,12\n"
+                "• исправить Д1 30,10"
+            )
+        else:
+            await handle_edit_command_new(update, context, state, text)
         return
     
     # Обработка ввода новых данных для исправления
@@ -547,8 +594,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Команда "удалить"
-    if text_lower.startswith('удалить'):
-        await handle_delete_command_new(update, context, state, text)
+    if text_lower.startswith('удалить') or text_lower == 'удалить':
+        if text_lower == 'удалить':
+            await update.message.reply_text(
+                "Формат: удалить КОД дата\n\n"
+                "Примеры:\n"
+                "• удалить Д7 12,12\n"
+                "• удалить Д1 30,10"
+            )
+        else:
+            await handle_delete_command_new(update, context, state, text)
         return
     
     # Обработка выбора что удалить
