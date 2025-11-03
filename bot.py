@@ -76,6 +76,9 @@ class UserState:
         self.merge_candidates: Optional[list] = None
         self.merge_period: Optional[tuple] = None
         
+        # Для проверки дубликатов в отчёте
+        self.duplicate_check_data: Optional[dict] = None
+        
         # ID сообщений бота для удаления
         self.bot_messages: list = []
     
@@ -425,10 +428,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Обработка подтверждения объединения дубликатов
+    if state.mode == 'awaiting_duplicate_confirm':
+        await handle_duplicate_confirmation(update, context, state, text, text_lower)
+        return
+    
     # Проверка воронок (пользователь не может переключиться пока не завершит)
     active_modes = [
         'awaiting_date', 'awaiting_edit_data', 'awaiting_delete_choice',
-        'awaiting_report_club', 'awaiting_report_period',
+        'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
         'awaiting_export_club', 'awaiting_export_period',
         'awaiting_merge_confirm', 'awaiting_reset_pin'
     ]
@@ -598,13 +606,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state.report_club == 'оба':
             # Сначала отчеты по каждому клубу
             for club in ['Москвич', 'Анора']:
-                await generate_and_send_report(update, club, date_from, date_to)
+                await generate_and_send_report(update, club, date_from, date_to, state)
             
             # Затем проверяем возможность сводного отчета
             await prepare_merged_report(update, state, date_from, date_to)
         else:
             club = 'Москвич' if state.report_club == 'москвич' else 'Анора'
-            await generate_and_send_report(update, club, date_from, date_to)
+            await generate_and_send_report(update, club, date_from, date_to, state)
             state.mode = None
             state.report_club = None
         return
@@ -1380,7 +1388,115 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
         await update.message.reply_text("ℹ️ Нет данных для сводного отчета")
 
 
-async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str):
+def find_code_duplicates(operations: list) -> list:
+    """
+    Поиск дубликатов: один код, но одна запись с именем, другая без
+    """
+    from collections import defaultdict
+    
+    by_code = defaultdict(lambda: {'with_name': [], 'without_name': []})
+    
+    for op in operations:
+        code = op['code']
+        if op['name']:
+            by_code[code]['with_name'].append(op)
+        else:
+            by_code[code]['without_name'].append(op)
+    
+    # Ищем коды где есть И с именем И без имени
+    duplicates = []
+    for code, data in by_code.items():
+        if data['with_name'] and data['without_name']:
+            duplicates.append({
+                'code': code,
+                'with_name': data['with_name'],
+                'without_name': data['without_name']
+            })
+    
+    return duplicates
+
+
+async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                       state: UserState, text: str, text_lower: str):
+    """Обработка подтверждения объединения дубликатов"""
+    if not state.duplicate_check_data:
+        await update.message.reply_text("❌ Ошибка: данные не найдены")
+        state.mode = None
+        return
+    
+    data = state.duplicate_check_data
+    duplicates = data['duplicates']
+    operations = data['operations']
+    
+    # Обработка ответа
+    if text_lower == 'ок' or text_lower == 'ok':
+        # Объединяем все дубликаты
+        exclude_indices = []
+    else:
+        # Парсим номера для исключения
+        try:
+            exclude_indices = [int(x.strip()) - 1 for x in text.replace(',', ' ').split() if x.strip().isdigit()]
+        except:
+            await update.message.reply_text("❌ Неверный формат. Используйте: ок или 1,2")
+            return
+    
+    # Объединяем операции
+    merged_operations = []
+    codes_to_merge = set()
+    
+    for i, dup in enumerate(duplicates):
+        if i not in exclude_indices:
+            codes_to_merge.add(dup['code'])
+    
+    # Обрабатываем операции
+    for op in operations:
+        if op['code'] in codes_to_merge:
+            # Находим запись с именем для этого кода
+            dup_info = next((d for d in duplicates if d['code'] == op['code']), None)
+            if dup_info and dup_info['with_name']:
+                # Берём имя из записи с именем
+                merged_name = dup_info['with_name'][0]['name']
+                merged_op = op.copy()
+                merged_op['name'] = merged_name
+                merged_operations.append(merged_op)
+            else:
+                merged_operations.append(op)
+        else:
+            merged_operations.append(op)
+    
+    # Генерируем отчёт с объединёнными данными
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_operations)
+    
+    report_text = ReportGenerator.format_report_text(
+        report_rows, totals, check_ok, totals_recalc, 
+        data['club'], f"{data['date_from']} .. {data['date_to']}"
+    )
+    
+    await update.message.reply_text(report_text, parse_mode='Markdown')
+    
+    # Создаем XLSX
+    club_translit = 'moskvich' if data['club'] == 'Москвич' else 'anora'
+    filename = f"otchet_{club_translit}_{data['date_from']}_{data['date_to']}.xlsx"
+    
+    ReportGenerator.generate_xlsx(filename, report_rows, totals, data['club'], 
+                                  f"{data['date_from']} .. {data['date_to']}")
+    
+    with open(filename, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=filename,
+            caption=f"📊 Отчет {data['club']} ({data['date_from']} .. {data['date_to']})"
+        )
+    
+    os.remove(filename)
+    
+    # Очищаем состояние
+    state.mode = None
+    state.duplicate_check_data = None
+
+
+async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str, 
+                                  state: UserState = None, check_duplicates: bool = True):
     """Генерация и отправка отчета"""
     operations = db.get_operations_by_period(club, date_from, date_to)
     
@@ -1392,7 +1508,49 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
         )
         return
     
-    # Генерируем отчет
+    # Проверка на дубликаты (одинаковый код, но с именем и без)
+    if check_duplicates and state:
+        duplicates = find_code_duplicates(operations)
+        
+        if duplicates:
+            # Показываем запрос на объединение
+            response = [f"⚠️ Найдены записи с одинаковым кодом:\n"]
+            
+            for i, dup in enumerate(duplicates, 1):
+                response.append(f"{i}. Код: {dup['code']}")
+                
+                # С именем
+                names_with = set(op['name'] for op in dup['with_name'])
+                for name in names_with:
+                    ops = [op for op in dup['with_name'] if op['name'] == name]
+                    total_nal = sum(op['amount'] for op in ops if op['channel'] == 'нал')
+                    total_bez = sum(op['amount'] for op in ops if op['channel'] == 'безнал')
+                    response.append(f"   • {name}: НАЛ {total_nal:.0f}, БЕЗНАЛ {total_bez:.0f}")
+                
+                # Без имени
+                total_nal_no = sum(op['amount'] for op in dup['without_name'] if op['channel'] == 'нал')
+                total_bez_no = sum(op['amount'] for op in dup['without_name'] if op['channel'] == 'безнал')
+                response.append(f"   • (без имени): НАЛ {total_nal_no:.0f}, БЕЗНАЛ {total_bez_no:.0f}")
+                response.append("")
+            
+            response.append("Объединить?")
+            response.append("• ок - объединить все")
+            response.append("• 1,2 - НЕ объединять (номера через запятую)")
+            
+            await update.message.reply_text('\n'.join(response))
+            
+            # Сохраняем данные для обработки
+            state.duplicate_check_data = {
+                'club': club,
+                'date_from': date_from,
+                'date_to': date_to,
+                'operations': operations,
+                'duplicates': duplicates
+            }
+            state.mode = 'awaiting_duplicate_confirm'
+            return
+    
+    # Генерируем отчет (без дубликатов или после подтверждения)
     report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(operations)
     
     report_text = ReportGenerator.format_report_text(
