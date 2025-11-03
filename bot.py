@@ -675,9 +675,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text_lower.startswith('исправить') or text_lower == 'исправить':
         if text_lower == 'исправить':
             await update.message.reply_text(
-                "Введите код и дату:\n\n"
+                "📝 Введите код и дату:\n\n"
                 "Примеры:\n"
-                "• Д7 12,12\n"
+                "• Д7 3,11\n"
                 "• Д1 30,10"
             )
             state.mode = 'awaiting_edit_params'
@@ -987,9 +987,10 @@ async def handle_edit_command_new(update: Update, context: ContextTypes.DEFAULT_
         current_data[op['channel']] = op['amount']
     
     response.append("\nВведите новые значения:")
-    response.append("Формат: нал 1000")
-    response.append("        безнал 2000")
-    response.append("        готово")
+    response.append("Примеры:")
+    response.append("• нал 1100")
+    response.append("• безнал 2500")
+    response.append("• нал 1100 безнал 2500")
     
     await update.message.reply_text('\n'.join(response))
     
@@ -1003,43 +1004,68 @@ async def handle_edit_command_new(update: Update, context: ContextTypes.DEFAULT_
 async def handle_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                             state: UserState, text: str, text_lower: str):
     """Обработка ввода новых значений для исправления"""
-    if text_lower == 'готово':
-        # Сохраняем изменения (если были)
-        if hasattr(state, 'edit_new_values') and state.edit_new_values:
-            for channel, amount in state.edit_new_values.items():
-                db.update_operation(state.club, state.edit_date, state.edit_code, channel, amount)
-            
-            await update.message.reply_text(
-                f"✅ Данные {state.edit_code} за {state.edit_date} обновлены"
-            )
-            
-            # Очищаем
-            state.mode = None
-            state.edit_new_values = {}
+    # Парсим ввод: нал 1100 или безнал 2500 или нал 1100 безнал 2500
+    parts = text_lower.split()
+    
+    # Ищем пары: канал + сумма
+    updates = []
+    i = 0
+    while i < len(parts):
+        if parts[i] in ['нал', 'безнал']:
+            if i + 1 < len(parts):
+                channel = parts[i]
+                success, amount, error = DataParser.parse_amount(parts[i + 1])
+                
+                if success:
+                    updates.append((channel, amount))
+                    i += 2
+                else:
+                    await update.message.reply_text(f"❌ {error}")
+                    return
+            else:
+                await update.message.reply_text(f"❌ Не указана сумма для {parts[i]}")
+                return
         else:
-            await update.message.reply_text("❌ Не введено новых значений")
+            await update.message.reply_text(
+                f"❌ Неверный формат.\n\n"
+                f"Примеры:\n"
+                f"• нал 1100\n"
+                f"• безнал 2500\n"
+                f"• нал 1100 безнал 2500"
+            )
+            return
+    
+    if not updates:
+        await update.message.reply_text(
+            "❌ Не указаны данные для обновления.\n\n"
+            "Примеры:\n"
+            "• нал 1100\n"
+            "• безнал 2500\n"
+            "• нал 1100 безнал 2500"
+        )
         return
     
-    # Парсим ввод: нал 1000 или безнал 2000
-    parts = text_lower.split()
-    if len(parts) == 2 and parts[0] in ['нал', 'безнал']:
-        channel = parts[0]
-        success, amount, error = DataParser.parse_amount(parts[1])
-        
+    # Сохраняем изменения СРАЗУ
+    updated_channels = []
+    for channel, amount in updates:
+        success, msg = db.update_operation(state.club, state.edit_date, state.edit_code, channel, amount)
         if success:
-            if not hasattr(state, 'edit_new_values'):
-                state.edit_new_values = {}
-            state.edit_new_values[channel] = amount
-            await update.message.reply_text(f"✓ {channel.upper()}: {amount:.0f}")
+            updated_channels.append(f"{channel.upper()}: {amount:.0f}")
         else:
-            await update.message.reply_text(f"❌ {error}")
-    else:
-        await update.message.reply_text(
-            "❌ Неверный формат. Используйте:\n"
-            "нал 1000\n"
-            "безнал 2000\n"
-            "готово"
-        )
+            await update.message.reply_text(f"❌ Ошибка обновления {channel}: {msg}")
+            return
+    
+    # Показываем результат
+    await update.message.reply_text(
+        f"✅ Данные {state.edit_code} за {state.edit_date} обновлены:\n" +
+        "\n".join(f"• {ch}" for ch in updated_channels)
+    )
+    
+    # Очищаем состояние
+    state.mode = None
+    state.edit_code = None
+    state.edit_date = None
+    state.edit_current_data = None
 
 
 async def handle_delete_command_new(update: Update, context: ContextTypes.DEFAULT_TYPE, 
