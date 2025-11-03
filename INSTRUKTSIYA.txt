@@ -1,0 +1,94 @@
+================================================================================
+                         INSTRUKCIYA PO ISPOLZOVANIYU BOTA
+================================================================================
+
+BOT: @moskvich_moneybot
+STATUS: RABOTAET
+
+================================================================================
+  SHAG 1: NAIDITE BOTA V TELEGRAM
+================================================================================
+
+1. Otkroite Telegram
+2. V poiske vvedite: @moskvich_moneybot
+3. Nazhmite na bota
+4. Nazhmite knopku START
+
+================================================================================
+  SHAG 2: VIBERITE KLUB (BEZ SLESHA!)
+================================================================================
+
+PRAVILNO:
+  start moskvich
+
+ILI
+
+  start anora
+
+NEPRAVILNO:
+  /start moskvich  <- tak ne rabotaet!
+
+================================================================================
+  SHAG 3: VVEDITE DANNYE
+================================================================================
+
+1. Otpravte: nal
+
+2. Vstavte spisok:
+   D1 Zhanna 2200
+   R7 Ivan 700
+   K3 Anton 500
+
+3. Otpravte: gotovo
+
+4. Otpravte: data/zapisat
+
+================================================================================
+  SHAG 4: POLUCHITE OTCHET
+================================================================================
+
+Otpravte: proshu otchet
+
+================================================================================
+  VSE KOMANDY (BEZ SLESHA):
+================================================================================
+
+start moskvich         - Vibrat klub Moskvich
+start anora            - Vibrat klub Anora
+nal                    - Nachat vvod NAL
+beznal                 - Nachat vvod BEZNAL
+gotovo                 - Zavershit vvod
+data/zapisat           - Sohranit dannye
+proshu otchet          - Poluchit otchet
+spisok 2025-11-03      - Pokazat zapisi za datu
+eksport nedelya ...    - Eksport v Excel
+
+================================================================================
+  VAZNO!
+================================================================================
+
+1. NE ZAKRYVAITE okno CMD/PowerShell s botom!
+
+2. Komandy pishite BEZ slesha:
+   PRAVILNO: start moskvich
+   NEPRAVILNO: /start moskvich
+
+3. Esli bot ne otvechaet:
+   - Provertte chto okno s botom otkryto
+   - Otpravte: /start
+   - Zatem: start moskvich
+
+================================================================================
+  KAK PEREZAPUSTIT BOTA
+================================================================================
+
+Esli zakrili bota:
+1. Dvazdy kliknite na fail: start.bat
+
+================================================================================
+
+                    BOT: @moskvich_moneybot
+                    GOTOV K RABOTE!
+
+================================================================================
+

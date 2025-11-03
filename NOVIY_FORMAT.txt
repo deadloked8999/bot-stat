@@ -1,0 +1,90 @@
+================================================================================
+                    OBNOVLENIYE PARSERA - NOVIY FORMAT
+================================================================================
+
+STATUS: Parser obnovlen! Bot perezapuschen!
+
+================================================================================
+  CHTO IZMENENO:
+================================================================================
+
+Parser teper podderzhivaet DVA formata vvoda dannykh:
+
+1. STARIY FORMAT (rabotaet kak ranshe):
+   Kod Imya Summa
+   
+   Primer:
+   D1 Zhanna 2200
+   R7 Ivan 700
+
+2. NOVIY FORMAT (teper tozhe rabotaet):
+   Kod Imya-Summa
+   
+   Primer:
+   D7 Nadi-6800
+   D13 Margo-15450
+   OF4 Nika-1200
+
+================================================================================
+  PRIMERY ISPOLZOVANIYA:
+================================================================================
+
+Otkroyte bota @moskvich_moneybot v Telegram:
+
+1. Otpravte: start moskvich
+
+2. Otpravte: nal
+
+3. Vstavte dannye v NOVOM formate:
+   D7 Nadi-6800
+   D13 Margo-15450
+   D38 Eva-1200
+   OF4 Nika-1200
+   RDzh6 Dima-600
+   LmA17 Yulya-500
+
+4. Otpravte: gotovo
+
+5. Otpravte: data/zapisat
+
+================================================================================
+  SMESHANNIY FORMAT:
+================================================================================
+
+Mozhno ispolzovat OBA formata ODNOVREMENNO!
+
+Primer:
+D1 Zhanna 2200
+D7 Nadi-6800
+R7 Ivan Sergeevich 700
+OF4 Nika-1200
+
+Vse eto budet pravilno obrabotano!
+
+================================================================================
+  PODDERZHKA SLOZHNYKH KODOV:
+================================================================================
+
+Parser teper ponimact vse kirillitskie bukvy v kodakh:
+
+D7   -> D7
+OF4  -> OF4
+RDzh6 -> RDZH6
+LmA17 -> LMA17
+
+================================================================================
+  KAK PROVERIT:
+================================================================================
+
+1. Bot uzhe perezapuschen s novym parserom
+2. Otkroyte @moskvich_moneybot
+3. Poprobuite otpravit dannye v novom formate
+4. Bot dolzhen pravilno obrabotat!
+
+================================================================================
+
+                    BOT OBNOVLEN I RABOTAET!
+                    @moskvich_moneybot
+
+================================================================================
+
