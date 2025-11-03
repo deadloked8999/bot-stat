@@ -31,11 +31,13 @@ from utils import (
     extract_club_from_text,
     format_operations_list
 )
-import auth
 
 
 # Состояния пользователя
 USER_STATES = {}
+
+# Авторизованные пользователи (в памяти - сбрасывается при перезапуске!)
+AUTHORIZED_USERS = set()
 
 # Пин-код для доступа
 PIN_CODE = "1664"
@@ -152,7 +154,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     # Проверка авторизации
-    if not auth.is_authorized(user_id):
+    if user_id not in AUTHORIZED_USERS:
         await update.message.reply_text(
             "🔒 Введите пин-код для доступа:",
             reply_markup=ReplyKeyboardRemove()
@@ -210,9 +212,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_lower = normalize_command(text)
     
     # Проверка авторизации
-    if not auth.is_authorized(user_id):
+    if user_id not in AUTHORIZED_USERS:
         if text == PIN_CODE:
-            auth.add_user(user_id)
+            AUTHORIZED_USERS.add(user_id)
             await update.message.reply_text(
                 "✅ Доступ разрешён!\n\n"
                 "Выберите клуб, нажав на кнопку ниже:",
@@ -314,7 +316,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Команда "завершить" - выход из сессии
     if text_lower == 'завершить' or text_lower == '🚪 завершить':
-        auth.remove_user(user_id)
+        AUTHORIZED_USERS.discard(user_id)
         state.reset_input()
         state.club = None
         await update.message.reply_text(
