@@ -189,7 +189,7 @@ class Database:
         existing = cursor.fetchone()
         if not existing:
             conn.close()
-            return False, "Запись не найдена"
+            return False, f"Запись не найдена (club={club}, date={date}, code={code}, channel={channel})"
         
         old_amount = existing[0]
         created_at = datetime.now().isoformat()
