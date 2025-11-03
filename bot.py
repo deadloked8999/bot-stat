@@ -1763,9 +1763,19 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка нажатий на inline кнопки"""
     query = update.callback_query
-    await query.answer()
     
     user_id = update.effective_user.id
+    
+    # Проверка авторизации
+    if user_id not in AUTHORIZED_USERS:
+        await query.answer("🔒 Требуется авторизация", show_alert=True)
+        await query.message.reply_text(
+            "🔒 Введите пин-код для доступа:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
+    await query.answer()
     state = get_user_state(user_id)
     
     # Выбор клуба при старте
