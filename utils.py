@@ -143,8 +143,10 @@ def parse_period(period_str: str) -> Tuple[bool, str, str, str]:
 
 def normalize_command(text: str) -> str:
     """
-    Нормализация команды: удаление лишних пробелов, приведение к нижнему регистру
+    Нормализация команды: удаление лишних пробелов, приведение к нижнему регистру, ё→е
     """
+    # Заменяем ё на е
+    text = text.replace('ё', 'е').replace('Ё', 'Е')
     return ' '.join(text.strip().lower().split())
 
 
