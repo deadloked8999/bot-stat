@@ -605,13 +605,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text_lower.startswith('список') or text_lower == 'список':
         if text_lower == 'список':
             await update.message.reply_text(
-                "Формат: список дата\n\n"
+                "Введите дату:\n\n"
                 "Примеры:\n"
-                "• список 12,12\n"
-                "• список 30,10"
+                "• 12,12\n"
+                "• 3,10\n"
+                "• 30.10"
             )
+            state.mode = 'awaiting_list_date'
         else:
             await handle_list_command(update, context, state, text)
+        return
+    
+    # Обработка ввода даты для списка
+    if state.mode == 'awaiting_list_date':
+        success, parsed_date, error = parse_short_date(text)
+        if success:
+            operations = db.get_operations_by_date(state.club, parsed_date)
+            response = format_operations_list(operations, parsed_date, state.club)
+            await update.message.reply_text(response)
+            state.mode = None
+        else:
+            await update.message.reply_text(f"❌ {error}")
         return
     
     # Команда "исправить"
