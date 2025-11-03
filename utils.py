@@ -197,10 +197,8 @@ def format_operations_list(operations: list, date: str, club: str) -> str:
         
         for op in ops:
             result.append(
-                f"  {op['channel'].upper()}: {op['name']} — {op['amount']:.2f}"
+                f"  {op['channel'].upper()}: {op['name']} — {op['amount']:.0f}"
             )
-            if op.get('original_line'):
-                result.append(f"    Исходная строка: {op['original_line']}")
         
         result.append("")
     
