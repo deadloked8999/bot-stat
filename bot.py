@@ -72,6 +72,9 @@ class UserState:
         # Для команды экспорт
         self.export_club: Optional[str] = None
         
+        # Для команды список
+        self.list_club: Optional[str] = None
+        
         # Для сводного отчета
         self.merge_candidates: Optional[list] = None
         self.merge_period: Optional[tuple] = None
@@ -435,10 +438,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Проверка воронок (пользователь не может переключиться пока не завершит)
     active_modes = [
-        'awaiting_date', 'awaiting_edit_data', 'awaiting_delete_choice',
+        'awaiting_date', 'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
         'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
         'awaiting_export_club', 'awaiting_export_period',
-        'awaiting_merge_confirm', 'awaiting_reset_pin'
+        'awaiting_merge_confirm', 'awaiting_reset_pin',
+        'awaiting_list_club', 'awaiting_list_date'
     ]
     
     if state.mode in active_modes and text_lower == 'отмена':
@@ -648,25 +652,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text_lower.startswith('список') or text_lower == 'список':
         if text_lower == 'список':
             await update.message.reply_text(
-                "Введите дату:\n\n"
+                "📋 Выберите клуб для просмотра записей:",
+                reply_markup=get_club_report_keyboard()
+            )
+            state.mode = 'awaiting_list_club'
+        else:
+            await handle_list_command(update, context, state, text)
+        return
+    
+    # Обработка выбора клуба для списка
+    if state.mode == 'awaiting_list_club':
+        club_choice = text_lower
+        if club_choice in ['москвич', 'анора', 'оба']:
+            state.list_club = club_choice
+            await update.message.reply_text(
+                "📅 Введите дату:\n\n"
                 "Примеры:\n"
-                "• 12,12\n"
-                "• 3,10\n"
-                "• 30.10"
+                "• 3,11\n"
+                "• 30,10"
             )
             state.mode = 'awaiting_list_date'
         else:
-            await handle_list_command(update, context, state, text)
+            await update.message.reply_text("❌ Выберите: москвич, анора или оба")
         return
     
     # Обработка ввода даты для списка
     if state.mode == 'awaiting_list_date':
         success, parsed_date, error = parse_short_date(text)
         if success:
-            operations = db.get_operations_by_date(state.club, parsed_date)
-            response = format_operations_list(operations, parsed_date, state.club)
-            await update.message.reply_text(response)
+            if state.list_club == 'оба':
+                # Показываем списки для обоих клубов
+                for club in ['Москвич', 'Анора']:
+                    operations = db.get_operations_by_date(club, parsed_date)
+                    response = format_operations_list(operations, parsed_date, club)
+                    await update.message.reply_text(response)
+            else:
+                # Показываем список для одного клуба
+                club = 'Москвич' if state.list_club == 'москвич' else 'Анора'
+                operations = db.get_operations_by_date(club, parsed_date)
+                response = format_operations_list(operations, parsed_date, club)
+                await update.message.reply_text(response)
+            
             state.mode = None
+            state.list_club = None
         else:
             await update.message.reply_text(f"❌ {error}")
         return
@@ -1757,7 +1785,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=get_main_keyboard()
         )
     
-    # Выбор клуба для отчёта
+    # Выбор клуба для отчёта / экспорта / списка
     elif query.data in ['report_club_moskvich', 'report_club_anora', 'report_club_both']:
         club_map = {
             'report_club_moskvich': 'москвич',
@@ -1765,7 +1793,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             'report_club_both': 'оба'
         }
         
-        # Определяем режим (отчёт или экспорт)
+        # Определяем режим (отчёт, экспорт или список)
         if state.mode == 'awaiting_export_club':
             state.export_club = club_map[query.data]
             await query.edit_message_text(
@@ -1775,6 +1803,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"• Период: 10,06-11,08"
             )
             state.mode = 'awaiting_export_period'
+        elif state.mode == 'awaiting_list_club':
+            state.list_club = club_map[query.data]
+            await query.edit_message_text(
+                f"📋 Список: {state.list_club}\n\n"
+                f"📅 Введите дату:\n"
+                f"• 3,11\n"
+                f"• 30,10"
+            )
+            state.mode = 'awaiting_list_date'
         else:
             state.report_club = club_map[query.data]
             await query.edit_message_text(
