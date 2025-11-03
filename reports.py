@@ -112,36 +112,51 @@ class ReportGenerator:
                           check_ok: bool, totals_recalc: Dict,
                           club: str, period: str) -> str:
         """
-        Форматирование отчета для вывода в Telegram (упрощенный формат для мобильных)
+        Форматирование отчета для вывода в Telegram
         """
         if not report_rows:
             return f"📊 Отчет по клубу {club} за {period}\n\nДанных нет."
         
         result = []
-        result.append(f"📊 ОТЧЁТ: {club}")
-        result.append(f"📅 Период: {period}")
+        result.append(f"📊 ОТЧЕТ")
+        result.append(f"Клуб: {club}")
+        result.append(f"Период: {period}")
         result.append("")
         
-        # Строки отчета (упрощенный формат)
+        # Заголовок таблицы
+        result.append("```")
+        result.append(f"{'Имя':<20} {'Код':<6} {'Нал':>10} {'Безнал':>10} {'10%':>10} {'Итог':>12}")
+        result.append("-" * 80)
+        
+        # Строки отчета
         for row in report_rows:
-            result.append(f"👤 {row['name']} ({row['code']})")
+            name_display = row['name'][:20]  # Обрезаем длинные имена
             result.append(
-                f"НАЛ {row['nal']:.0f} | БЗН {row['beznal']:.0f} | ИТОГ {row['itog']:.0f}"
+                f"{name_display:<20} {row['code']:<6} "
+                f"{row['nal']:>10.2f} {row['beznal']:>10.2f} "
+                f"{row['minus10']:>10.2f} {row['itog']:>12.2f}"
             )
-            result.append("")
         
         # Итоги
-        result.append("💰 ИТОГО")
+        result.append("-" * 80)
         result.append(
-            f"НАЛ {totals['nal']:.0f} | БЗН {totals['beznal']:.0f} | ИТОГ {totals['itog']:.0f}"
+            f"{'ИТОГО':<20} {'':<6} "
+            f"{totals['nal']:>10.2f} {totals['beznal']:>10.2f} "
+            f"{totals['minus10']:>10.2f} {totals['itog']:>12.2f}"
         )
+        result.append("```")
         result.append("")
         
         # Проверка
         if check_ok:
-            result.append("✅ Сверка: OK")
+            result.append("✅ Сверка столбцов: совпадает")
         else:
-            result.append("❗ Сверка: ОШИБКА")
+            result.append("❗ Сверка столбцов: РАСХОЖДЕНИЕ")
+            result.append("Пересчёт:")
+            result.append(f"  Нал: {totals['nal']} vs {totals_recalc['nal']}")
+            result.append(f"  Безнал: {totals['beznal']} vs {totals_recalc['beznal']}")
+            result.append(f"  10%: {totals['minus10']} vs {totals_recalc['minus10']}")
+            result.append(f"  Итог: {totals['itog']} vs {totals_recalc['itog']}")
         
         return '\n'.join(result)
     
