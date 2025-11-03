@@ -3,6 +3,9 @@
 *.sqlite
 *.sqlite3
 
+# Авторизация
+authorized_users.json
+
 # Токены и конфигурация
 config_local.py
 

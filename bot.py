@@ -31,13 +31,11 @@ from utils import (
     extract_club_from_text,
     format_operations_list
 )
+import auth
 
 
 # Состояния пользователя
 USER_STATES = {}
-
-# Авторизованные пользователи
-AUTHORIZED_USERS = set()
 
 # Пин-код для доступа
 PIN_CODE = "1664"
@@ -102,7 +100,7 @@ def get_main_keyboard():
         ['📊 ОТЧЁТ', '💰 ВЫПЛАТЫ'],
         ['📋 СПИСОК', '📤 ЭКСПОРТ'],
         ['✏️ ИСПРАВИТЬ', '🗑️ УДАЛИТЬ'],
-        ['❓ ПОМОЩЬ']
+        ['❓ ПОМОЩЬ', '🚪 ЗАВЕРШИТЬ']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -154,7 +152,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
+    if not auth.is_authorized(user_id):
         await update.message.reply_text(
             "🔒 Введите пин-код для доступа:",
             reply_markup=ReplyKeyboardRemove()
@@ -212,9 +210,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_lower = normalize_command(text)
     
     # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
+    if not auth.is_authorized(user_id):
         if text == PIN_CODE:
-            AUTHORIZED_USERS.add(user_id)
+            auth.add_user(user_id)
             await update.message.reply_text(
                 "✅ Доступ разрешён!\n\n"
                 "Выберите клуб, нажав на кнопку ниже:",
@@ -314,6 +312,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
     
+    # Команда "завершить" - выход из сессии
+    if text_lower == 'завершить' or text_lower == '🚪 завершить':
+        auth.remove_user(user_id)
+        state.reset_input()
+        state.club = None
+        await update.message.reply_text(
+            "👋 Сессия завершена.\n"
+            "Для повторного входа введите пин-код.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
     # Сопоставление кнопок с командами
     button_commands = {
         '🏢 старт москвич': 'старт москвич',
@@ -329,7 +339,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '📤 экспорт': 'экспорт',
         '✏️ исправить': 'исправить',
         '🗑️ удалить': 'удалить',
-        '❓ помощь': 'помощь'
+        '❓ помощь': 'помощь',
+        '🚪 завершить': 'завершить'
     }
     
     # Если нажата кнопка - преобразуем в команду
