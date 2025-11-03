@@ -944,17 +944,21 @@ async def handle_edit_command_new(update: Update, context: ContextTypes.DEFAULT_
         )
         return
     
-    # Формат: исправить Д1 30,10
+    # Формат: Д1 30,10 (без слова "исправить")
+    # Убираем "исправить" если есть (для обратной совместимости)
     parts = text.split()
-    if len(parts) < 3:
+    if parts[0].lower() in ['исправить', 'ispravit']:
+        parts = parts[1:]  # Убираем первое слово
+    
+    if len(parts) < 2:
         await update.message.reply_text(
             "❌ Неверный формат.\n"
-            "Пример: исправить Д1 30,10"
+            "Пример: Д1 30,10"
         )
         return
     
-    code = DataParser.normalize_code(parts[1])
-    date_str = parts[2]
+    code = DataParser.normalize_code(parts[0])
+    date_str = parts[1]
     
     # Парсим дату
     success, parsed_date, error = parse_short_date(date_str)
