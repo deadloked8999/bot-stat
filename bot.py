@@ -571,15 +571,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Команда "выплаты"
     if text_lower.startswith('выплаты') or text_lower == 'выплаты':
         if text_lower == 'выплаты':
-            # Нажата кнопка - просим ввести параметры
+            # Нажата кнопка - переходим в режим ожидания
             await update.message.reply_text(
-                "Формат: выплаты КОД период\n\n"
+                "Выплаты за период\n\n"
+                "Введите сотрудника и период:\n\n"
                 "Примеры:\n"
-                "• выплаты Д7 12,12\n"
-                "• выплаты Д7 10,06-11,08"
+                "• Д7 12,12\n"
+                "• Д7 10,06-11,08"
             )
+            state.mode = 'awaiting_payments_input'
         else:
             await handle_payments_command(update, context, state, text)
+        return
+    
+    # Обработка ввода для выплат (после кнопки)
+    if state.mode == 'awaiting_payments_input':
+        await handle_payments_command(update, context, state, text)
+        state.mode = None
         return
     
     # Команда "список"
@@ -1351,27 +1359,37 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
 async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                   state: UserState, text: str):
     """Обработка команды выплаты"""
-    # Формат: выплаты Д1 30,10-1,11
     parts = text.split()
-    if len(parts) < 3:
-        await update.message.reply_text(
-            "❌ Неверный формат.\n"
-            "Пример: выплаты Д1 30,10-1,11"
-        )
-        return
     
-    code = DataParser.normalize_code(parts[1])
-    period_str = parts[2]
+    # Определяем формат ввода
+    if parts[0].lower() == 'выплаты':
+        # Формат: выплаты Д1 30,10-1,11
+        if len(parts) < 3:
+            await update.message.reply_text(
+                "❌ Неверный формат.\n"
+                "Пример: выплаты Д1 30,10-1,11"
+            )
+            return
+        code = DataParser.normalize_code(parts[1])
+        period_str = parts[2]
+    else:
+        # Упрощённый формат (после кнопки): Д1 30,10-1,11
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Неверный формат.\n"
+                "Пример: Д1 30,10-1,11"
+            )
+            return
+        code = DataParser.normalize_code(parts[0])
+        period_str = parts[1]
     
     # Парсим период (одна дата или диапазон)
     if '-' in period_str:
-        # Диапазон: 10,06-11,08
         success, date_from, date_to, error = parse_date_range(period_str)
         if not success:
             await update.message.reply_text(f"❌ {error}")
             return
     else:
-        # Одна дата: 12,12
         success, single_date, error = parse_short_date(period_str)
         if not success:
             await update.message.reply_text(f"❌ {error}")
@@ -1379,8 +1397,8 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         date_from = single_date
         date_to = single_date
     
-    # Получаем выплаты сотрудника (по всем клубам если не указан активный клуб)
-    payments = db.get_employee_payments(code, date_from, date_to, state.club)
+    # Получаем выплаты ПО ВСЕМ КЛУБАМ
+    payments = db.get_employee_payments(code, date_from, date_to, None)
     
     if not payments:
         await update.message.reply_text(
@@ -1390,29 +1408,61 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         )
         return
     
-    # Формируем ответ
+    # Формируем ответ с группировкой по клубам
     response_parts = []
     response_parts.append(f"📊 Выплаты сотруднику {code}")
     response_parts.append(f"Период: {date_from} .. {date_to}\n")
     
-    total = 0
-    current_club = None
+    # Группируем по клубам
+    from collections import defaultdict
+    by_club = defaultdict(lambda: {'nal': 0, 'beznal': 0, 'payments': []})
     
     for payment in payments:
-        if current_club != payment['club']:
-            if current_club is not None:
-                response_parts.append("")
-            response_parts.append(f"🏢 Клуб: {payment['club']}")
-            current_club = payment['club']
+        club = payment['club']
+        by_club[club]['payments'].append(payment)
         
-        response_parts.append(
-            f"  {payment['date']} | {payment['channel'].upper():7} | "
-            f"{payment['name']:15} | {payment['amount']:.0f}"
-        )
-        total += payment['amount']
+        if payment['channel'] == 'нал':
+            by_club[club]['nal'] += payment['amount']
+        else:
+            by_club[club]['beznal'] += payment['amount']
     
-    response_parts.append("")
-    response_parts.append(f"💰 Всего выплат: {total:.0f}")
+    # Общие итоги
+    total_nal = 0
+    total_beznal = 0
+    
+    # Выводим по каждому клубу
+    for club in sorted(by_club.keys()):
+        data = by_club[club]
+        response_parts.append(f"🏢 Клуб: {club}")
+        
+        for payment in data['payments']:
+            if payment['channel'] == 'нал':
+                response_parts.append(
+                    f"  {payment['date']} | НАЛ     | {payment['name']:15} | {payment['amount']:.0f}"
+                )
+            else:
+                # БЕЗНАЛ - показываем полную сумму и к выплате (минус 10%)
+                to_pay = payment['amount'] * 0.9
+                response_parts.append(
+                    f"  {payment['date']} | БЕЗНАЛ  | {payment['name']:15} | {payment['amount']:.0f} (к выплате: {to_pay:.0f})"
+                )
+        
+        # Итог по клубу
+        club_total = data['nal'] + (data['beznal'] * 0.9)
+        response_parts.append(f"  Итого {club}: {club_total:.0f}\n")
+        
+        total_nal += data['nal']
+        total_beznal += data['beznal']
+    
+    # Общий итог по всем клубам
+    total_minus10 = total_beznal * 0.1
+    total_itog = total_nal + (total_beznal - total_minus10)
+    
+    response_parts.append("💰 ИТОГО ПО ВСЕМ КЛУБАМ:")
+    response_parts.append(f"  НАЛ: {total_nal:.0f}")
+    response_parts.append(f"  БЕЗНАЛ: {total_beznal:.0f}")
+    response_parts.append(f"  10% от безнала: {total_minus10:.0f}")
+    response_parts.append(f"  ИТОГО к выплате: {total_itog:.0f}")
     
     await update.message.reply_text('\n'.join(response_parts))
 
