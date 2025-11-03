@@ -6,12 +6,13 @@ import re
 from datetime import datetime
 from typing import Dict, Optional
 
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     ContextTypes,
+    CallbackQueryHandler,
     filters
 )
 
@@ -93,6 +94,48 @@ def get_user_state(user_id: int) -> UserState:
     return USER_STATES[user_id]
 
 
+def get_main_keyboard():
+    """Главная клавиатура с основными командами"""
+    keyboard = [
+        ['📥 НАЛ', '📥 БЕЗНАЛ'],
+        ['✅ ГОТОВО', '❌ ОТМЕНА'],
+        ['📊 ОТЧЁТ', '💰 ВЫПЛАТЫ'],
+        ['📋 СПИСОК', '📤 ЭКСПОРТ'],
+        ['✏️ ИСПРАВИТЬ', '🗑️ УДАЛИТЬ'],
+        ['❓ ПОМОЩЬ']
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def get_club_keyboard():
+    """Клавиатура для выбора клуба"""
+    keyboard = [
+        [InlineKeyboardButton("🏢 Москвич", callback_data='club_moskvich')],
+        [InlineKeyboardButton("🏢 Анора", callback_data='club_anora')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_club_report_keyboard():
+    """Клавиатура для выбора клуба в отчёте"""
+    keyboard = [
+        [InlineKeyboardButton("🏢 Москвич", callback_data='report_club_moskvich')],
+        [InlineKeyboardButton("🏢 Анора", callback_data='report_club_anora')],
+        [InlineKeyboardButton("🏢🏢 ОБА", callback_data='report_club_both')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_delete_keyboard():
+    """Клавиатура для выбора что удалить"""
+    keyboard = [
+        [InlineKeyboardButton("📗 НАЛ", callback_data='delete_nal')],
+        [InlineKeyboardButton("📘 БЕЗНАЛ", callback_data='delete_beznal')],
+        [InlineKeyboardButton("🗑️ ОБЕ", callback_data='delete_both')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 # Инициализация базы данных
 db = Database()
 
@@ -119,10 +162,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not club:
         await update.message.reply_text(
-            "❌ Не указан клуб.\n\n"
-            "Используйте:\n"
-            "старт москвич\n"
-            "старт анора"
+            "Выберите клуб:",
+            reply_markup=get_club_keyboard()
         )
         return
     
@@ -134,22 +175,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ Выбран клуб: {club}\n"
         f"📅 Дата: {state.current_date}\n\n"
-        f"📋 Доступные команды:\n\n"
-        f"💰 ВВОД ДАННЫХ:\n"
-        f"• нал — начать ввод НАЛ\n"
-        f"• безнал — начать ввод БЕЗНАЛ\n"
-        f"• готово — завершить и сохранить\n\n"
-        f"📊 ОТЧЁТЫ:\n"
-        f"• отчет — получить отчёт\n"
-        f"• выплаты КОД период — выплаты сотруднику\n\n"
-        f"📝 РЕДАКТИРОВАНИЕ:\n"
-        f"• список дата — просмотр записей\n"
-        f"• исправить КОД дата — изменить\n"
-        f"• удалить КОД дата — удалить\n\n"
-        f"📤 ЭКСПОРТ:\n"
-        f"• экспорт — экспорт в Excel\n\n"
-        f"❓ СПРАВКА:\n"
-        f"• помощь — все команды"
+        f"Используйте кнопки ниже для работы с ботом:",
+        reply_markup=get_main_keyboard()
     )
 
 
@@ -261,6 +288,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Неверный пин-код. Операция отменена."
             )
         return
+    
+    # Сопоставление кнопок с командами
+    button_commands = {
+        '📥 нал': 'нал',
+        '📥 безнал': 'безнал',
+        '✅ готово': 'готово',
+        '❌ отмена': 'отмена',
+        '📊 отчёт': 'отчет',
+        '📊 отчет': 'отчет',
+        '💰 выплаты': 'выплаты',
+        '📋 список': 'список',
+        '📤 экспорт': 'экспорт',
+        '✏️ исправить': 'исправить',
+        '🗑️ удалить': 'удалить',
+        '❓ помощь': 'помощь'
+    }
+    
+    # Если нажата кнопка - преобразуем в команду
+    if text_lower in button_commands:
+        text_lower = button_commands[text_lower]
     
     # Команда "помощь"
     if text_lower in ['помощь', 'help']:
@@ -419,10 +466,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Команда "отчет"
     if text_lower == 'отчет':
         await update.message.reply_text(
-            "Выберите клуб:\n"
-            "• москвич\n"
-            "• анора\n"
-            "• оба"
+            "Выберите клуб:",
+            reply_markup=get_club_report_keyboard()
         )
         state.mode = 'awaiting_report_club'
         return
@@ -514,10 +559,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Команда "экспорт"
     if text_lower == 'экспорт':
         await update.message.reply_text(
-            "Выберите клуб для экспорта:\n"
-            "• москвич\n"
-            "• анора\n"
-            "• оба"
+            "Выберите клуб для экспорта:",
+            reply_markup=get_club_report_keyboard()  # Используем ту же клавиатуру
         )
         state.mode = 'awaiting_export_club'
         return
@@ -886,11 +929,8 @@ async def handle_delete_command_new(update: Update, context: ContextTypes.DEFAUL
         delete_records[op['channel']] = op['amount']
     
     response.append("\nЧто удалить?")
-    response.append("• нал")
-    response.append("• безнал")
-    response.append("• обе")
     
-    await update.message.reply_text('\n'.join(response))
+    await update.message.reply_text('\n'.join(response), reply_markup=get_delete_keyboard())
     
     # Сохраняем состояние
     state.delete_code = code
@@ -1302,6 +1342,111 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text('\n'.join(response_parts))
 
 
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатий на inline кнопки"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    state = get_user_state(user_id)
+    
+    # Выбор клуба при старте
+    if query.data == 'club_moskvich':
+        state.club = 'Москвич'
+        state.current_date = get_current_date()
+        state.reset_input()
+        
+        await query.edit_message_text(
+            f"✅ Выбран клуб: Москвич\n"
+            f"📅 Дата: {state.current_date}\n\n"
+            f"Используйте кнопки ниже для работы:"
+        )
+        await query.message.reply_text(
+            "Готово к работе!",
+            reply_markup=get_main_keyboard()
+        )
+    
+    elif query.data == 'club_anora':
+        state.club = 'Анора'
+        state.current_date = get_current_date()
+        state.reset_input()
+        
+        await query.edit_message_text(
+            f"✅ Выбран клуб: Анора\n"
+            f"📅 Дата: {state.current_date}\n\n"
+            f"Используйте кнопки ниже для работы:"
+        )
+        await query.message.reply_text(
+            "Готово к работе!",
+            reply_markup=get_main_keyboard()
+        )
+    
+    # Выбор клуба для отчёта
+    elif query.data in ['report_club_moskvich', 'report_club_anora', 'report_club_both']:
+        club_map = {
+            'report_club_moskvich': 'москвич',
+            'report_club_anora': 'анора',
+            'report_club_both': 'оба'
+        }
+        
+        # Определяем режим (отчёт или экспорт)
+        if state.mode == 'awaiting_export_club':
+            state.export_club = club_map[query.data]
+            await query.edit_message_text(
+                f"Экспорт: {state.export_club}\n\n"
+                f"Укажите дату или период:\n"
+                f"• Одна дата: 12,12\n"
+                f"• Период: 10,06-11,08"
+            )
+            state.mode = 'awaiting_export_period'
+        else:
+            state.report_club = club_map[query.data]
+            await query.edit_message_text(
+                f"Клуб: {state.report_club}\n\n"
+                f"Укажите дату или период:\n"
+                f"• Одна дата: 12,12\n"
+                f"• Период: 10,06-11,08"
+            )
+            state.mode = 'awaiting_report_period'
+    
+    # Выбор что удалить
+    elif query.data in ['delete_nal', 'delete_beznal', 'delete_both']:
+        channel_map = {
+            'delete_nal': 'нал',
+            'delete_beznal': 'безнал',
+            'delete_both': 'обе'
+        }
+        choice = channel_map[query.data]
+        
+        await query.edit_message_text(f"Удаление: {choice.upper()}...")
+        
+        # Обработка удаления
+        if choice in ['нал', 'безнал']:
+            if choice in state.delete_records:
+                db.delete_operation(state.club, state.delete_date, state.delete_code, choice)
+                await query.message.reply_text(
+                    f"✅ Удалено: {state.delete_code} {choice.upper()} за {state.delete_date}"
+                )
+            else:
+                await query.message.reply_text(f"❌ Записи {choice.upper()} нет")
+        
+        elif choice == 'обе':
+            deleted = []
+            for channel in ['нал', 'безнал']:
+                if channel in state.delete_records:
+                    db.delete_operation(state.club, state.delete_date, state.delete_code, channel)
+                    deleted.append(channel.upper())
+            
+            if deleted:
+                await query.message.reply_text(
+                    f"✅ Удалено: {state.delete_code} {', '.join(deleted)} за {state.delete_date}"
+                )
+            else:
+                await query.message.reply_text("❌ Нет записей для удаления")
+        
+        state.mode = None
+
+
 def main():
     """Запуск бота"""
     # Проверяем токен
@@ -1316,6 +1461,7 @@ def main():
     
     # Регистрируем обработчики
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Запускаем бота
