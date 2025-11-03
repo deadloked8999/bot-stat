@@ -163,6 +163,10 @@ class DataParser:
         # Нормализуем код (только регистр, кириллица остаётся)
         normalized_code = DataParser.normalize_code(code)
         
+        # Капитализируем имя (каждое слово с заглавной буквы)
+        if name:
+            name = ' '.join(word.capitalize() for word in name.split())
+        
         return True, {
             'code': normalized_code,
             'original_code': code,
