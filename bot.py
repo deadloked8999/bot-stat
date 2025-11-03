@@ -108,12 +108,21 @@ def get_main_keyboard():
 
 
 def get_club_keyboard():
-    """Клавиатура для выбора клуба"""
+    """Клавиатура для выбора клуба (Inline кнопки)"""
     keyboard = [
         [InlineKeyboardButton("🏢 Москвич", callback_data='club_moskvich')],
         [InlineKeyboardButton("🏢 Анора", callback_data='club_anora')]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def get_club_choice_keyboard():
+    """Постоянная клавиатура для выбора клуба (Reply кнопки)"""
+    keyboard = [
+        ['🏢 СТАРТ МОСКВИЧ'],
+        ['🏢 СТАРТ АНОРА']
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 def get_club_report_keyboard():
@@ -160,6 +169,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = ""
     
+    # Если команда /start без параметров - показываем выбор клуба
+    if text.strip() == '/start':
+        await update.message.reply_text(
+            "Выберите клуб:",
+            reply_markup=get_club_choice_keyboard()
+        )
+        return
+    
     # Определяем клуб
     club = None
     if 'москвич' in text:
@@ -169,8 +186,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not club:
         await update.message.reply_text(
-            "Выберите клуб:",
-            reply_markup=get_club_keyboard()
+            "Выберите клуб, нажав на кнопку ниже:",
+            reply_markup=get_club_choice_keyboard()
         )
         return
     
@@ -200,8 +217,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             AUTHORIZED_USERS.add(user_id)
             await update.message.reply_text(
                 "✅ Доступ разрешён!\n\n"
-                "Выберите клуб:",
-                reply_markup=get_club_keyboard()
+                "Выберите клуб, нажав на кнопку ниже:",
+                reply_markup=get_club_choice_keyboard()
             )
         else:
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
@@ -213,7 +230,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.reset_input()
             await update.message.reply_text(
                 "❌ Ввод данных отменён. Данные не сохранены.\n"
-                "Начните заново: нал / безнал"
+                "Начните заново: нал / безнал",
+                reply_markup=get_main_keyboard()
             )
             return
         
@@ -298,6 +316,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Сопоставление кнопок с командами
     button_commands = {
+        '🏢 старт москвич': 'старт москвич',
+        '🏢 старт анора': 'старт анора',
         '📥 нал': 'нал',
         '📥 безнал': 'безнал',
         '✅ готово': 'готово',
@@ -1413,11 +1433,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         await query.edit_message_text(
             f"✅ Выбран клуб: Москвич\n"
-            f"📅 Дата: {state.current_date}\n\n"
-            f"Используйте кнопки ниже для работы:"
+            f"📅 Дата: {state.current_date}"
         )
         await query.message.reply_text(
-            "Готово к работе!",
+            "Используйте кнопки ниже для работы:",
             reply_markup=get_main_keyboard()
         )
     
@@ -1428,11 +1447,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         await query.edit_message_text(
             f"✅ Выбран клуб: Анора\n"
-            f"📅 Дата: {state.current_date}\n\n"
-            f"Используйте кнопки ниже для работы:"
+            f"📅 Дата: {state.current_date}"
         )
         await query.message.reply_text(
-            "Готово к работе!",
+            "Используйте кнопки ниже для работы:",
             reply_markup=get_main_keyboard()
         )
     
