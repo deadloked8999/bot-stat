@@ -8,33 +8,50 @@ from typing import List, Dict, Tuple
 class DataParser:
     """Парсер для блочного ввода данных"""
     
+    # Специальные коды (только буквы, без цифр)
+    SPECIAL_CODES = ['СБ', 'СБН', 'УБОРЩИЦА']
+    
     @staticmethod
     def normalize_code(code: str) -> str:
         """
         Нормализация кода сотрудника
-        Д/D, Р/R и т.д. приводим к единому виду
+        Оставляем кириллицу как есть, только приводим к верхнему регистру
         """
-        code = code.strip().upper()
+        return code.strip().upper()
+    
+    @staticmethod
+    def is_code(text: str) -> bool:
+        """
+        Проверка, является ли текст кодом
+        Код = буква(ы) + цифра ИЛИ специальный код
+        """
+        text_upper = text.strip().upper()
         
-        # Карта замен кириллица -> латиница
-        cyrillic_to_latin = {
-            'А': 'A', 'В': 'B', 'Д': 'D', 'Е': 'E', 'Ё': 'E',
-            'Ж': 'ZH', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K',
-            'Л': 'L', 'М': 'M', 'Н': 'H', 'О': 'O', 'П': 'P',
-            'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'Y', 'Ф': 'F',
-            'Х': 'X', 'Ц': 'TS', 'Ч': 'CH', 'Ш': 'SH', 'Щ': 'SCH',
-            'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'YU', 'Я': 'YA'
-        }
+        # Проверка на специальные коды
+        if text_upper in DataParser.SPECIAL_CODES:
+            return True
         
-        # Заменяем кириллические буквы на латинские
-        normalized = ''
-        for char in code:
-            if char in cyrillic_to_latin:
-                normalized += cyrillic_to_latin[char]
-            else:
-                normalized += char
+        # Проверка на наличие цифры (обычный код типа Д17, СБ5)
+        return any(c.isdigit() for c in text)
+    
+    @staticmethod
+    def is_name(text: str) -> bool:
+        """
+        Проверка, является ли текст именем
+        Имя = только буквы БЕЗ цифр И не в списке специальных кодов
+        """
+        text_upper = text.strip().upper()
         
-        return normalized
+        # Если в списке специальных - это код
+        if text_upper in DataParser.SPECIAL_CODES:
+            return False
+        
+        # Если есть цифра - это код
+        if any(c.isdigit() for c in text):
+            return False
+        
+        # Только буквы - это имя
+        return True
     
     @staticmethod
     def parse_amount(amount_str: str) -> Tuple[bool, float, str]:
@@ -64,73 +81,86 @@ class DataParser:
     def parse_line(line: str, line_number: int) -> Tuple[bool, Dict, str]:
         """
         Парсинг одной строки
-        Поддерживаемые форматы:
-        1. <код> <имя> <сумма>  (например: Д7 Нади 6800)
-        2. <код> <имя>-<сумма>  (например: Д7 Нади-6800)
-        3. <код без номера>-<сумма> (например: Уборщица-2000)
-        4. <код> <имя фамилия>-<сумма> (например: СБ Дмитрий Васенев-4000)
-        5. <только код>-<сумма> (например: P8-1000)
+        НОВАЯ ЛОГИКА:
+        - КОД = буква(ы)+цифра ИЛИ специальный код (СБ, СБН, УБОРЩИЦА)
+        - ИМЯ = только буквы без цифр
+        - Примеры: "юля д17 1000" = код:Д17 имя:юля сумма:1000
+                   "д17 юля 1000" = код:Д17 имя:юля сумма:1000
         Возвращает: (успех, данные, сообщение об ошибке)
         """
         line = line.strip()
         if not line:
             return False, {}, "Пустая строка"
         
-        # Разбиваем по пробелам и табуляции
-        parts = re.split(r'\s+', line)
-        
-        code = None
-        name = None
-        amount_str = None
-        
-        # Определяем формат
-        if len(parts) >= 3:
-            # Формат 1: код имя сумма (три или более элемента)
-            code = parts[0]
-            amount_str = parts[-1]
-            name_parts = parts[1:-1]
-            name = ' '.join(name_parts) if name_parts else ""
+        # Обработка формата с дефисом: "имя-сумма" или "код имя-сумма"
+        if '-' in line:
+            # Находим последний дефис (перед суммой)
+            last_dash = line.rfind('-')
+            before_dash = line[:last_dash].strip()
+            amount_str = line[last_dash + 1:].strip()
             
-        elif len(parts) == 2:
-            # Формат 2: код имя-сумма (два элемента, второй содержит дефис)
-            code = parts[0]
-            name_amount = parts[1]
+            if not before_dash or not amount_str:
+                return False, {}, f"Строка {line_number}: неверный формат с дефисом. Строка: '{line}'"
             
-            # Ищем последний дефис (для случаев типа "Нади-Мари-6800")
-            if '-' in name_amount:
-                last_dash_index = name_amount.rfind('-')
-                name = name_amount[:last_dash_index]
-                amount_str = name_amount[last_dash_index + 1:]
-                
-                if not amount_str:
-                    return False, {}, f"Строка {line_number}: отсутствует сумма после дефиса. Строка: '{line}'"
-            else:
-                return False, {}, f"Строка {line_number}: неверный формат. Ожидается 'код имя-сумма' или 'код имя сумма'. Строка: '{line}'"
-        
-        elif len(parts) == 1:
-            # Формат 3: всё слитно с дефисом (Уборщица-2000)
-            if '-' in parts[0]:
-                last_dash_index = parts[0].rfind('-')
-                code = parts[0][:last_dash_index]
-                amount_str = parts[0][last_dash_index + 1:]
-                name = ""
-                
-                if not code:
-                    return False, {}, f"Строка {line_number}: отсутствует код. Строка: '{line}'"
-                if not amount_str:
-                    return False, {}, f"Строка {line_number}: отсутствует сумма. Строка: '{line}'"
-            else:
-                return False, {}, f"Строка {line_number}: неверный формат. Строка: '{line}'"
-        
+            # Парсим сумму
+            success, amount, error = DataParser.parse_amount(amount_str)
+            if not success:
+                return False, {}, f"Строка {line_number}: {error}. Строка: '{line}'"
+            
+            # Разбиваем часть до дефиса
+            before_parts = re.split(r'\s+', before_dash)
+            
+            # Ищем код
+            code = None
+            name_parts = []
+            
+            for part in before_parts:
+                if DataParser.is_code(part) and code is None:
+                    code = part
+                else:
+                    name_parts.append(part)
+            
+            # Если код не найден - первая часть считается кодом
+            if code is None:
+                code = before_parts[0] if before_parts else ""
+                name_parts = before_parts[1:] if len(before_parts) > 1 else []
+            
+            name = ' '.join(name_parts)
+            
         else:
-            return False, {}, f"Строка {line_number}: недостаточно элементов. Строка: '{line}'"
+            # Формат без дефиса: "код имя сумма"
+            parts = re.split(r'\s+', line)
+            
+            if len(parts) < 2:
+                return False, {}, f"Строка {line_number}: недостаточно элементов. Строка: '{line}'"
+            
+            # Последний элемент - сумма
+            amount_str = parts[-1]
+            
+            # Парсим сумму
+            success, amount, error = DataParser.parse_amount(amount_str)
+            if not success:
+                return False, {}, f"Строка {line_number}: {error}. Строка: '{line}'"
+            
+            # Ищем код среди оставшихся элементов
+            remaining_parts = parts[:-1]
+            code = None
+            name_parts = []
+            
+            for part in remaining_parts:
+                if DataParser.is_code(part) and code is None:
+                    code = part
+                else:
+                    name_parts.append(part)
+            
+            # Если код не найден - первая часть считается кодом
+            if code is None:
+                code = remaining_parts[0] if remaining_parts else ""
+                name_parts = remaining_parts[1:] if len(remaining_parts) > 1 else []
+            
+            name = ' '.join(name_parts)
         
-        # Парсим сумму
-        success, amount, error = DataParser.parse_amount(amount_str)
-        if not success:
-            return False, {}, f"Строка {line_number}: {error}. Строка: '{line}'"
-        
-        # Нормализуем код
+        # Нормализуем код (только регистр, кириллица остаётся)
         normalized_code = DataParser.normalize_code(code)
         
         return True, {
