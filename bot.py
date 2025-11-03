@@ -999,52 +999,43 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
 
 
 async def generate_merged_report(update: Update, state: UserState, excluded: set):
-    """Генерация сводного отчета"""
+    """Генерация сводного отчета из ОБОИХ клубов"""
     date_from, date_to = state.merge_period
     
-    # Получаем данные обоих клубов
+    # Получаем ВСЕ данные обоих клубов
     ops_m = db.get_operations_by_period('Москвич', date_from, date_to)
     ops_a = db.get_operations_by_period('Анора', date_from, date_to)
     
-    # Создаём объединённый список операций
+    # Создаём объединённый список операций для СВОДНОГО отчёта
     merged_ops = []
     
-    # Коды которые объединяем
-    merged_codes = set()
+    # Множество обработанных пар (код, имя)
+    processed = set()
+    
+    # 1. Добавляем ОБЪЕДИНЁННЫЕ записи (которые пользователь подтвердил)
     for i, candidate in enumerate(state.merge_candidates):
+        code = candidate['code']
+        name = candidate['name']
+        
         if i not in excluded:
-            merged_codes.add((candidate['code'], candidate['name']))
-    
-    # Добавляем объединённые записи
-    for code, name in merged_codes:
-        # Суммируем по обоим клубам
-        total_nal = 0
-        total_beznal = 0
-        
-        for op in ops_m + ops_a:
-            if op['code'] == code and op['name'] == name:
-                if op['channel'] == 'нал':
-                    total_nal += op['amount']
-                else:
-                    total_beznal += op['amount']
-        
-        if total_nal > 0:
-            merged_ops.append({
-                'code': code, 'name': name, 'channel': 'нал', 'amount': total_nal, 'date': date_from
-            })
-        if total_beznal > 0:
-            merged_ops.append({
-                'code': code, 'name': name, 'channel': 'безнал', 'amount': total_beznal, 'date': date_from
-            })
-    
-    # Добавляем НЕ объединённые записи
-    for i, candidate in enumerate(state.merge_candidates):
-        if i in excluded:
-            # Не объединять - добавляем отдельно
-            code = candidate['code']
-            name = candidate['name']
+            # ОБЪЕДИНЯЕМ - суммируем из обоих клубов
+            total_nal = candidate['moskvich']['nal'] + candidate['anora']['nal']
+            total_beznal = candidate['moskvich']['beznal'] + candidate['anora']['beznal']
             
-            # Москвич
+            if total_nal > 0:
+                merged_ops.append({
+                    'code': code, 'name': name, 'channel': 'нал', 
+                    'amount': total_nal, 'date': date_from
+                })
+            if total_beznal > 0:
+                merged_ops.append({
+                    'code': code, 'name': name, 'channel': 'безнал', 
+                    'amount': total_beznal, 'date': date_from
+                })
+            
+            processed.add((code, name))
+        else:
+            # НЕ объединяем - добавляем раздельно с пометкой клуба
             if candidate['moskvich']['nal'] > 0:
                 merged_ops.append({
                     'code': code, 'name': f"{name} (Москвич)", 'channel': 'нал',
@@ -1055,8 +1046,6 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                     'code': code, 'name': f"{name} (Москвич)", 'channel': 'безнал',
                     'amount': candidate['moskvich']['beznal'], 'date': date_from
                 })
-            
-            # Анора
             if candidate['anora']['nal'] > 0:
                 merged_ops.append({
                     'code': code, 'name': f"{name} (Анора)", 'channel': 'нал',
@@ -1067,31 +1056,32 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                     'code': code, 'name': f"{name} (Анора)", 'channel': 'безнал',
                     'amount': candidate['anora']['beznal'], 'date': date_from
                 })
+            
+            processed.add((code, name))
     
-    # Добавляем уникальные записи (которых нет в другом клубе)
-    merged_code_names = {(c['code'], c['name'].split(' (')[0]) for c in state.merge_candidates}
-    
+    # 2. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (уникальные для каждого клуба)
     for op in ops_m + ops_a:
-        if (op['code'], op['name']) not in merged_code_names:
+        if (op['code'], op['name']) not in processed:
             merged_ops.append(op)
     
-    # Генерируем отчет
+    # Генерируем СВОДНЫЙ отчет
     if merged_ops:
         report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_ops)
         report_text = ReportGenerator.format_report_text(
-            report_rows, totals, check_ok, totals_recalc, "СВОДНЫЙ (Оба клуба)", f"{date_from} .. {date_to}"
+            report_rows, totals, check_ok, totals_recalc, 
+            "📊 СВОДНЫЙ ОТЧЁТ (Москвич + Анора)", f"{date_from} .. {date_to}"
         )
         await update.message.reply_text(report_text, parse_mode='Markdown')
         
         # Экспорт сводного
         filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
         ReportGenerator.generate_xlsx(
-            report_rows, totals, "СВОДНЫЙ", f"{date_from} .. {date_to}", filename
+            report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename
         )
         with open(filename, 'rb') as f:
             await update.message.reply_document(
                 document=f, filename=filename,
-                caption=f"📊 СВОДНЫЙ ОТЧЁТ\nПериод: {date_from} .. {date_to}"
+                caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}"
             )
         os.remove(filename)
     else:
