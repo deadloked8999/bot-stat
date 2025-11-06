@@ -211,6 +211,44 @@ class Database:
         conn.close()
         return True, f"Готово: {code} {channel} {old_amount} → {new_amount} ({date})"
     
+    def update_operation_name(self, club: str, date: str, code: str, 
+                             channel: str, new_name: str) -> Tuple[bool, str]:
+        """Обновить имя операции (для объединения дубликатов)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Получаем старое значение
+        cursor.execute("""
+            SELECT name_snapshot FROM operations
+            WHERE club = ? AND date = ? AND code = ? AND channel = ?
+        """, (club, date, code, channel))
+        
+        existing = cursor.fetchone()
+        if not existing:
+            conn.close()
+            return False, f"Запись не найдена"
+        
+        old_name = existing[0]
+        created_at = datetime.now().isoformat()
+        
+        # Обновляем имя
+        cursor.execute("""
+            UPDATE operations
+            SET name_snapshot = ?, created_at = ?
+            WHERE club = ? AND date = ? AND code = ? AND channel = ?
+        """, (new_name, created_at, club, date, code, channel))
+        
+        # Журнал (используем action для хранения старого и нового имени)
+        cursor.execute("""
+            INSERT INTO edit_log (club, date, code, channel, action, old_value, new_value, edited_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (club, date, code, channel, f'merge_name: "{old_name}" -> "{new_name}"', 
+              0, 0, created_at))
+        
+        conn.commit()
+        conn.close()
+        return True, f"Обновлено имя: {code} {channel} '{old_name}' → '{new_name}' ({date})"
+    
     def delete_operation(self, club: str, date: str, code: str, channel: str) -> Tuple[bool, str]:
         """Удалить операцию"""
         conn = self.get_connection()

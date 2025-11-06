@@ -1555,37 +1555,48 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
         )
         return
     
-    # Объединяем операции
-    merged_operations = []
-    codes_to_merge = set()
+    # СОХРАНЯЕМ ОБЪЕДИНЕНИЕ В БД!
+    updated_count = 0
     
     for i, dup in enumerate(duplicates):
         if i in indices_to_merge:
-            codes_to_merge.add(dup['code'])
+            code = dup['code']
+            
+            # Берём имя из записи с именем
+            if dup['with_name']:
+                merged_name = dup['with_name'][0]['name']
+                
+                # Обновляем ВСЕ записи БЕЗ имени для этого кода в БД
+                for op_without_name in dup['without_name']:
+                    # Обновляем в БД
+                    success, msg = db.update_operation_name(
+                        club=data['club'],
+                        date=op_without_name['date'],
+                        code=code,
+                        channel=op_without_name['channel'],
+                        new_name=merged_name
+                    )
+                    if success:
+                        updated_count += 1
     
-    # Обрабатываем операции
-    for op in operations:
-        if op['code'] in codes_to_merge:
-            # Находим запись с именем для этого кода
-            dup_info = next((d for d in duplicates if d['code'] == op['code']), None)
-            if dup_info and dup_info['with_name']:
-                # Берём имя из записи с именем
-                merged_name = dup_info['with_name'][0]['name']
-                merged_op = op.copy()
-                merged_op['name'] = merged_name
-                merged_operations.append(merged_op)
-            else:
-                merged_operations.append(op)
-        else:
-            merged_operations.append(op)
+    # Получаем ОБНОВЛЁННЫЕ данные из БД
+    updated_operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
     
     # Генерируем отчёт с объединёнными данными
-    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_operations)
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(updated_operations)
     
     report_text = ReportGenerator.format_report_text(
         report_rows, totals, check_ok, totals_recalc, 
         data['club'], f"{data['date_from']} .. {data['date_to']}"
     )
+    
+    # Уведомление об успешном объединении
+    if updated_count > 0:
+        await update.message.reply_text(
+            f"✅ Дубликаты объединены и СОХРАНЕНЫ в БД!\n"
+            f"📝 Обновлено записей: {updated_count}\n\n"
+            f"📊 Отчёт с обновлёнными данными:"
+        )
     
     await update.message.reply_text(report_text, parse_mode='Markdown')
     
