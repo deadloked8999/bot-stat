@@ -176,6 +176,85 @@ class DataParser:
         }, ""
     
     @staticmethod
+    def clean_excel_duplicates(line: str) -> Tuple[str, int]:
+        """
+        Очистка дублей из Excel (когда копируют несколько колонок)
+        Возвращает: (очищенная_строка, количество_удаленных_дублей)
+        
+        Пример:
+        "Д4 Дарина-18000  Д4 Дарина-  Д4 Дарина-" -> ("Д4 Дарина-18000", 2)
+        """
+        parts = line.split()
+        
+        if len(parts) < 3:
+            return line, 0  # Слишком мало частей, дублей быть не может
+        
+        # Ищем повторяющиеся коды
+        from collections import Counter
+        
+        # Собираем все части которые могут быть кодами
+        potential_codes = []
+        for part in parts:
+            if DataParser.is_code(part):
+                potential_codes.append(DataParser.normalize_code(part))
+        
+        # Считаем повторения
+        code_counts = Counter(potential_codes)
+        
+        # Если есть код который повторяется 2+ раза
+        for code, count in code_counts.items():
+            if count >= 2:
+                # Находим первое вхождение этого кода
+                first_occurrence_idx = None
+                for i, part in enumerate(parts):
+                    if DataParser.is_code(part) and DataParser.normalize_code(part) == code:
+                        first_occurrence_idx = i
+                        break
+                
+                if first_occurrence_idx is not None:
+                    # Ищем где заканчивается первая запись (до следующего вхождения кода)
+                    # Берем код + следующую часть (имя) + следующую (сумма если есть)
+                    # Пример: "Д4 Дарина-18000" или "Д4 Дарина 18000"
+                    
+                    # Собираем первую запись
+                    first_record_parts = []
+                    i = first_occurrence_idx
+                    found_amount = False
+                    
+                    while i < len(parts):
+                        current_part = parts[i]
+                        
+                        # Если это снова наш код и это не первое вхождение - стоп
+                        if i > first_occurrence_idx and DataParser.is_code(current_part) and DataParser.normalize_code(current_part) == code:
+                            break
+                        
+                        first_record_parts.append(current_part)
+                        
+                        # Проверяем есть ли сумма в этой части
+                        if '-' in current_part:
+                            # Формат "Дарина-18000"
+                            found_amount = True
+                            break
+                        elif current_part.replace('.', '').replace(',', '').isdigit():
+                            # Отдельная сумма
+                            found_amount = True
+                            break
+                        
+                        i += 1
+                        
+                        # Максимум 3 части (код имя сумма)
+                        if len(first_record_parts) >= 3:
+                            break
+                    
+                    # Если нашли запись с суммой, возвращаем её
+                    if found_amount and first_record_parts:
+                        cleaned_line = ' '.join(first_record_parts)
+                        removed_count = count - 1
+                        return cleaned_line, removed_count
+        
+        return line, 0
+    
+    @staticmethod
     def parse_block(text: str) -> Tuple[List[Dict], List[str]]:
         """
         Парсинг блока данных
@@ -184,13 +263,42 @@ class DataParser:
         lines = text.strip().split('\n')
         successful = []
         errors = []
+        cleaned_lines_info = []  # Информация об очищенных строках
         
         for i, line in enumerate(lines, 1):
-            success, data, error = DataParser.parse_line(line, i)
+            # Сначала очищаем от Excel дублей
+            cleaned_line, removed_count = DataParser.clean_excel_duplicates(line)
+            
+            if removed_count > 0:
+                cleaned_lines_info.append({
+                    'line_num': i,
+                    'original': line,
+                    'cleaned': cleaned_line,
+                    'removed': removed_count
+                })
+            
+            # Парсим очищенную строку
+            success, data, error = DataParser.parse_line(cleaned_line, i)
             if success:
                 successful.append(data)
+                # Добавляем информацию об очистке если была
+                if removed_count > 0:
+                    data['_excel_cleaned'] = True
+                    data['_original_line'] = line
             elif error and 'Пустая строка' not in error:
                 errors.append(error)
+        
+        # Если были очищены строки, добавляем информационное сообщение
+        if cleaned_lines_info:
+            info_lines = ["⚠️ Обнаружены дубли из Excel (автоматически очищены):"]
+            for info in cleaned_lines_info[:5]:  # Показываем первые 5
+                info_lines.append(f"   Строка {info['line_num']}: удалено {info['removed']} дублей")
+            
+            if len(cleaned_lines_info) > 5:
+                info_lines.append(f"   ... и ещё {len(cleaned_lines_info) - 5} строк")
+            
+            # Добавляем как предупреждение в ошибки (но не критичное)
+            errors.insert(0, '\n'.join(info_lines))
         
         return successful, errors
     

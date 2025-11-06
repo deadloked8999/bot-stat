@@ -321,4 +321,51 @@ class Database:
             }
             for row in rows
         ]
+    
+    def get_edit_log(self, limit: int = 20, code: Optional[str] = None, 
+                     date: Optional[str] = None) -> List[Dict]:
+        """
+        Получить журнал изменений
+        limit: количество записей (по умолчанию 20)
+        code: фильтр по коду сотрудника
+        date: фильтр по дате
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT club, date, code, channel, action, old_value, new_value, edited_at
+            FROM edit_log
+            WHERE 1=1
+        """
+        params = []
+        
+        if code:
+            query += " AND code = ?"
+            params.append(code)
+        
+        if date:
+            query += " AND date = ?"
+            params.append(date)
+        
+        query += " ORDER BY edited_at DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                'club': row[0],
+                'date': row[1],
+                'code': row[2],
+                'channel': row[3],
+                'action': row[4],
+                'old_value': row[5],
+                'new_value': row[6],
+                'edited_at': row[7]
+            }
+            for row in rows
+        ]
 

@@ -435,6 +435,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• УДАЛИТЬ → код + дата (Д7 3,10)\n\n"
             "📤 ЭКСПОРТ:\n"
             "• ЭКСПОРТ → клуб → период → Excel файл\n\n"
+            "📜 ЖУРНАЛ ИЗМЕНЕНИЙ:\n"
+            "• ЖУРНАЛ → последние 20 изменений\n"
+            "• ЖУРНАЛ 50 → последние 50 изменений\n"
+            "• ЖУРНАЛ Д7 → все изменения по коду Д7\n"
+            "• ЖУРНАЛ 3,10 → все изменения за дату\n"
+            "Показывает: объединения, исправления, удаления\n\n"
             "🔧 ДОПОЛНИТЕЛЬНО:\n"
             "• ОБНУЛИТЬ → удалить все данные (нужен пин)\n"
             "• ЗАВЕРШИТЬ → выход (очистка истории)\n\n"
@@ -447,7 +453,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Юля Д17 1000\n"
             "• СБ Дмитрий 4000\n"
             "• Уборщица-2000\n"
-            "• Суммы: 40,000 или 40.000 → 40000 ✅"
+            "• Суммы: 40,000 или 40.000 → 40000 ✅\n\n"
+            "✨ АВТОМАТИЧЕСКАЯ ОЧИСТКА:\n"
+            "• Дубли из Excel очищаются автоматически\n"
+            "• Разделители тысяч (точки/запятые) удаляются\n"
+            "• В предпросмотре видно что было изменено"
         )
         return
     
@@ -754,6 +764,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка выбора что удалить
     if state.mode == 'awaiting_delete_choice':
         await handle_delete_choice(update, context, state, text_lower)
+        return
+    
+    # Команда "журнал"
+    if text_lower.startswith('журнал') or text_lower == 'журнал':
+        await handle_journal_command(update, context, state, text)
         return
     
     # Команда "экспорт"
@@ -1940,6 +1955,121 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text("❌ Нет записей для удаления")
         
         state.mode = None
+
+
+async def handle_journal_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                 state: UserState, text: str):
+    """Обработка команды журнал"""
+    parts = text.split()
+    
+    limit = 20  # По умолчанию 20 записей
+    code = None
+    date = None
+    
+    # Парсим параметры
+    # Формат: журнал [число] [код] [дата]
+    # Примеры: журнал, журнал 50, журнал Д7, журнал 3,10, журнал Д7 3,10
+    
+    if len(parts) >= 2:
+        # Проверяем второй параметр
+        if parts[1].isdigit():
+            limit = int(parts[1])
+            if limit > 100:
+                limit = 100  # Максимум 100
+        else:
+            # Это может быть код или дата
+            from parser import DataParser
+            from utils import parse_short_date
+            
+            # Пробуем как код
+            if DataParser.is_code(parts[1]):
+                code = DataParser.normalize_code(parts[1])
+            else:
+                # Пробуем как дату
+                success, parsed_date, error = parse_short_date(parts[1])
+                if success:
+                    date = parsed_date
+    
+    if len(parts) >= 3:
+        # Третий параметр
+        from parser import DataParser
+        from utils import parse_short_date
+        
+        if DataParser.is_code(parts[2]):
+            code = DataParser.normalize_code(parts[2])
+        else:
+            success, parsed_date, error = parse_short_date(parts[2])
+            if success:
+                date = parsed_date
+    
+    # Получаем журнал
+    logs = db.get_edit_log(limit=limit, code=code, date=date)
+    
+    if not logs:
+        filter_info = []
+        if code:
+            filter_info.append(f"код: {code}")
+        if date:
+            filter_info.append(f"дата: {date}")
+        
+        filter_str = f" ({', '.join(filter_info)})" if filter_info else ""
+        
+        await update.message.reply_text(
+            f"📜 Журнал изменений{filter_str}\n\n"
+            f"Записей не найдено."
+        )
+        return
+    
+    # Форматируем журнал
+    response_parts = []
+    response_parts.append("📜 ЖУРНАЛ ИЗМЕНЕНИЙ\n")
+    
+    if code:
+        response_parts.append(f"Фильтр: код {code}")
+    if date:
+        response_parts.append(f"Фильтр: дата {date}")
+    
+    response_parts.append(f"Показано: {len(logs)} из {limit}\n")
+    
+    for log in logs:
+        # Форматируем дату и время
+        edited_at = log['edited_at'][:16].replace('T', ' ')  # 2025-11-06T22:30:00 -> 2025-11-06 22:30
+        
+        action_type = log['action']
+        
+        # Определяем иконку по типу действия
+        if 'merge' in action_type:
+            icon = "🔄"
+            action_text = log['action'].replace('merge_name: ', '')
+        elif action_type == 'delete':
+            icon = "🗑️"
+            action_text = f"Удалено: {log['old_value']:.0f}"
+        elif action_type == 'manual_update':
+            icon = "✏️"
+            action_text = f"Исправлено: {log['old_value']:.0f} → {log['new_value']:.0f}"
+        elif action_type == 'update':
+            icon = "➕"
+            action_text = f"Добавлено: {log['old_value']:.0f} + ... = {log['new_value']:.0f}"
+        elif action_type == 'replace':
+            icon = "🔄"
+            action_text = f"Заменено: {log['old_value']:.0f} → {log['new_value']:.0f}"
+        else:
+            icon = "📝"
+            action_text = action_type
+        
+        response_parts.append(
+            f"{icon} {edited_at}\n"
+            f"   {log['club']} | {log['code']} | {log['channel'].upper()}\n"
+            f"   {action_text}\n"
+        )
+    
+    response_parts.append("─" * 35)
+    response_parts.append(f"\n💡 Команды:")
+    response_parts.append(f"• журнал 50 - показать 50 записей")
+    response_parts.append(f"• журнал Д7 - по коду Д7")
+    response_parts.append(f"• журнал 3,10 - за дату 03.10")
+    
+    await update.message.reply_text('\n'.join(response_parts))
 
 
 def check_internal_duplicates(nal_data: list, beznal_data: list) -> list:
