@@ -1648,9 +1648,13 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
                 response.append(f"   • (без имени): НАЛ {total_nal_no:.0f}, БЕЗНАЛ {total_bez_no:.0f}")
                 response.append("")
             
-            response.append("Объединить?")
-            response.append("• ок - объединить все")
-            response.append("• 1,2 - НЕ объединять (номера через запятую)")
+            response.append("─" * 35)
+            response.append("\n🔄 ОБЪЕДИНЕНИЕ ДУБЛИКАТОВ:\n")
+            response.append("• ОК → объединить все")
+            response.append("• ОК 1 → объединить только пункт 1")
+            response.append("• ОК 1 2 → объединить пункты 1 и 2")
+            response.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)")
+            response.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2")
             
             await update.message.reply_text('\n'.join(response))
             
