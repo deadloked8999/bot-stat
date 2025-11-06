@@ -655,6 +655,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Затем проверяем возможность сводного отчета
             await prepare_merged_report(update, state, date_from, date_to)
+            
+            # НЕ сбрасываем режим если ждём подтверждения объединения!
+            if state.mode != 'awaiting_merge_confirm':
+                state.mode = None
+                state.report_club = None
         else:
             club = 'Москвич' if state.report_club == 'москвич' else 'Анора'
             await generate_and_send_report(update, club, date_from, date_to, state)
@@ -1378,9 +1383,15 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
         response.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}")
         response.append("")
     
-    response.append("Объединить? Напишите:")
-    response.append("• ок - объединить все")
-    response.append("• 1,2 - НЕ объединять строки (через запятую)")
+    response.append("─" * 35)
+    response.append("\n🔄 ОБЪЕДИНЕНИЕ ДЛЯ СВОДНОГО ОТЧЁТА:\n")
+    response.append("• ОК → объединить все")
+    response.append("• ОК 1 → объединить только пункт 1")
+    response.append("• ОК 1 2 → объединить пункты 1 и 2")
+    response.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)")
+    response.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2")
+    response.append("\nℹ️ Примечание: объединение ТОЛЬКО для отчёта")
+    response.append("(данные в БД не изменяются)")
     
     await update.message.reply_text('\n'.join(response))
     
@@ -1391,19 +1402,54 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
 
 
 async def handle_merge_confirmation(update: Update, state: UserState, choice: str):
-    """Обработка подтверждения объединения"""
-    if choice == 'ок' or choice == 'ok':
-        # Объединяем все
-        excluded = set()
-    else:
-        # Парсим список исключений: 1,2,3
+    """Обработка подтверждения объединения для сводного отчёта"""
+    
+    # Обработка ответа с новой логикой
+    indices_to_merge = set()
+    
+    # Убираем знаки препинания для удобства парсинга: "не1,2" -> "не 1 2"
+    normalized_text = choice.replace(',', ' ').replace('.', ' ')
+    parts = normalized_text.split()
+    
+    if not parts:
+        await update.message.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
+        return
+    
+    command = parts[0]
+    
+    if command in ['ок', 'ok']:
+        # "ок" без номеров -> объединить ВСЕ
+        if len(parts) == 1:
+            indices_to_merge = set(range(len(state.merge_candidates)))
+        else:
+            # "ок 1 2" -> объединить ТОЛЬКО указанные
+            try:
+                indices_to_merge = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            except:
+                await update.message.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
+                return
+    elif command in ['не', 'net', 'нет']:
+        # "не 1 2" -> НЕ объединять указанные (объединить остальные)
         try:
-            excluded = set(int(x.strip()) - 1 for x in choice.split(','))
+            exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            indices_to_merge = set(range(len(state.merge_candidates))) - exclude_indices
         except:
-            await update.message.reply_text(
-                "❌ Неверный формат. Используйте: ок или 1,2,3"
-            )
+            await update.message.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
             return
+    else:
+        await update.message.reply_text(
+            "❌ Неверная команда.\n\n"
+            "Используйте:\n"
+            "• ок - объединить все\n"
+            "• ок 1 - объединить только пункт 1\n"
+            "• ок 1 2 - объединить пункты 1 и 2\n"
+            "• не 1 - НЕ объединять пункт 1 (остальные объединить)\n"
+            "• не 1 2 - НЕ объединять пункты 1 и 2"
+        )
+        return
+    
+    # Преобразуем в формат excluded (для совместимости с generate_merged_report)
+    excluded = set(range(len(state.merge_candidates))) - indices_to_merge
     
     # Генерируем сводный отчет
     await generate_merged_report(update, state, excluded)
