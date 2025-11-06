@@ -1344,7 +1344,8 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     if not merge_candidates:
         # Совпадений нет - генерируем сводный без объединения (просто все записи)
         await update.message.reply_text(
-            "ℹ️ Совпадений не найдено. Генерируется сводный отчёт из всех записей...\n"
+            "ℹ️ Совпадений не найдено\n"
+            "Генерируется сводный отчёт из всех записей..."
         )
         
         # Создаём сводный из всех операций
@@ -1352,11 +1353,15 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
         
         if all_ops:
             report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(all_ops)
-            report_text = ReportGenerator.format_report_text(
-                report_rows, totals, check_ok, totals_recalc, 
-                "📊 СВОДНЫЙ ОТЧЁТ (Москвич + Анора)", f"{date_from} .. {date_to}"
+            
+            # Краткая сводка
+            summary = format_report_summary(
+                totals, 
+                "СВОДНЫЙ (Москвич + Анора)", 
+                f"{date_from} .. {date_to}",
+                len(report_rows)
             )
-            await update.message.reply_text(report_text, parse_mode='Markdown')
+            await update.message.reply_text(summary)
             
             # Экспорт
             filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
@@ -1542,11 +1547,17 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
     if merged_ops:
         try:
             report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_ops)
-            report_text = ReportGenerator.format_report_text(
-                report_rows, totals, check_ok, totals_recalc, 
-                "📊 СВОДНЫЙ ОТЧЁТ (Москвич + Анора)", f"{date_from} .. {date_to}"
+            
+            # Краткая сводка вместо полного отчёта
+            merged_count = len(state.merge_candidates) - len(excluded) if state.merge_candidates else 0
+            summary = format_report_summary(
+                totals, 
+                "СВОДНЫЙ (Москвич + Анора)", 
+                f"{date_from} .. {date_to}",
+                len(report_rows),
+                merged_count
             )
-            await update.message.reply_text(report_text, parse_mode='Markdown')
+            await update.message.reply_text(summary)
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка генерации отчёта: {str(e)}")
             return
@@ -1564,7 +1575,7 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                 )
             os.remove(filename)
         except Exception as e:
-            await update.message.reply_text(f"⚠️ Отчёт показан, но ошибка создания Excel: {str(e)}")
+            await update.message.reply_text(f"⚠️ Ошибка создания Excel: {str(e)}")
     else:
         await update.message.reply_text("ℹ️ Нет данных для сводного отчета")
 
@@ -1683,20 +1694,16 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     # Генерируем отчёт с объединёнными данными
     report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(updated_operations)
     
-    report_text = ReportGenerator.format_report_text(
-        report_rows, totals, check_ok, totals_recalc, 
-        data['club'], f"{data['date_from']} .. {data['date_to']}"
+    # Краткая сводка с информацией об объединении
+    summary = format_report_summary(
+        totals, 
+        data['club'], 
+        f"{data['date_from']} .. {data['date_to']}",
+        len(report_rows),
+        updated_count
     )
     
-    # Уведомление об успешном объединении
-    if updated_count > 0:
-        await update.message.reply_text(
-            f"✅ Дубликаты объединены и СОХРАНЕНЫ в БД!\n"
-            f"📝 Обновлено записей: {updated_count}\n\n"
-            f"📊 Отчёт с обновлёнными данными:"
-        )
-    
-    await update.message.reply_text(report_text, parse_mode='Markdown')
+    await update.message.reply_text(summary)
     
     # Создаем XLSX
     club_translit = 'moskvich' if data['club'] == 'Москвич' else 'anora'
@@ -1782,11 +1789,14 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
     # Генерируем отчет (без дубликатов или после подтверждения)
     report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(operations)
     
-    report_text = ReportGenerator.format_report_text(
-        report_rows, totals, check_ok, totals_recalc, club, f"{date_from} .. {date_to}"
+    # Краткая сводка вместо полного отчёта
+    summary = format_report_summary(
+        totals, 
+        club, 
+        f"{date_from} .. {date_to}",
+        len(report_rows)
     )
-    
-    await update.message.reply_text(report_text, parse_mode='Markdown')
+    await update.message.reply_text(summary)
     
     # Создаем XLSX
     club_translit = 'moskvich' if club == 'Москвич' else 'anora'
@@ -2039,6 +2049,36 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text("❌ Нет записей для удаления")
         
         state.mode = None
+
+
+def format_report_summary(totals: Dict, club_name: str, period: str, 
+                         employee_count: int, merged_count: int = 0) -> str:
+    """
+    Форматирование краткой сводки отчёта
+    totals: словарь с итогами
+    club_name: название клуба или "СВОДНЫЙ"
+    period: период отчёта
+    employee_count: количество сотрудников
+    merged_count: количество объединённых дубликатов (если есть)
+    """
+    lines = []
+    lines.append("✅ ОТЧЁТ ГОТОВ!\n")
+    lines.append(f"🏢 Клуб: {club_name}")
+    lines.append(f"📅 Период: {period}")
+    lines.append(f"👥 Сотрудников: {employee_count}")
+    
+    if merged_count > 0:
+        lines.append(f"🔄 Объединено дубликатов: {merged_count}")
+    
+    lines.append("\n💰 ИТОГО:")
+    lines.append(f"   НАЛ:      {totals['nal']:,.0f}".replace(',', ' '))
+    lines.append(f"   БЕЗНАЛ:   {totals['beznal']:,.0f}".replace(',', ' '))
+    lines.append(f"   10%:      {totals['minus10']:,.0f}".replace(',', ' '))
+    lines.append(f"   {'─' * 25}")
+    lines.append(f"   ИТОГО:    {totals['itog']:,.0f}".replace(',', ' '))
+    lines.append("\n📄 Детальный отчёт в Excel файле ⬇️")
+    
+    return '\n'.join(lines)
 
 
 async def handle_journal_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
