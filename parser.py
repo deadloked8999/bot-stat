@@ -65,12 +65,12 @@ class DataParser:
         if ' ' in amount_str:
             return False, 0.0, "Пробелы внутри числа не допускаются. Пишите 12000"
         
-        # Проверка на точку или запятую (копейки не разрешены)
-        if '.' in amount_str or ',' in amount_str:
-            return False, 0.0, "Копейки не разрешены. Используйте только целые числа (например: 2200)"
+        # Автоматически удаляем точки и запятые (разделители тысяч)
+        # 40,000 или 40.000 → 40000
+        amount_str_cleaned = amount_str.replace(',', '').replace('.', '')
         
         try:
-            amount = int(amount_str)
+            amount = int(amount_str_cleaned)
             if amount < 0:
                 return False, 0.0, "Сумма не может быть отрицательной"
             return True, float(amount), ""
