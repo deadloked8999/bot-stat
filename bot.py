@@ -82,6 +82,11 @@ class UserState:
         # Для проверки дубликатов в отчёте
         self.duplicate_check_data: Optional[dict] = None
         
+        # Для предпросмотра данных
+        self.preview_date: Optional[str] = None
+        self.preview_duplicates: Optional[list] = None
+        self.edit_line_number: Optional[int] = None
+        
         # ID сообщений бота для удаления
         self.bot_messages: list = []
     
@@ -90,6 +95,9 @@ class UserState:
         self.mode = None
         self.temp_nal_data = []
         self.temp_beznal_data = []
+        self.preview_date = None
+        self.preview_duplicates = None
+        self.edit_line_number = None
     
     def has_data(self) -> bool:
         """Проверка наличия данных"""
@@ -243,9 +251,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
         return
     
-    # ЖЁСТКАЯ ВОРОНКА: если пользователь в режиме ожидания даты после "готово"
-    if state.mode == 'awaiting_date':
-        if text_lower == 'отмена':
+    # НОВАЯ ЛОГИКА: обработка предпросмотра и ввода даты
+    if state.mode == 'awaiting_preview_date':
+        if text_lower == 'отмена' or text_lower == '❌ отмена':
             state.reset_input()
             await update.message.reply_text(
                 "❌ Ввод данных отменён. Данные не сохранены.\n"
@@ -257,42 +265,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Пытаемся распарсить дату
         success, parsed_date, error = parse_short_date(text)
         if success:
-            # Сохраняем данные (код уже есть ниже)
-            saved_count = 0
+            # Сохраняем дату и показываем финальный предпросмотр
+            state.preview_date = parsed_date
+            await show_data_preview(update, state, show_duplicates=True)
             
-            for item in state.temp_nal_data:
-                db.add_or_update_operation(
-                    club=state.club,
-                    date=parsed_date,
-                    code=item['code'],
-                    name=item['name'],
-                    channel='нал',
-                    amount=item['amount'],
-                    original_line=item['original_line'],
-                    aggregate=True
-                )
-                saved_count += 1
-            
-            for item in state.temp_beznal_data:
-                db.add_or_update_operation(
-                    club=state.club,
-                    date=parsed_date,
-                    code=item['code'],
-                    name=item['name'],
-                    channel='безнал',
-                    amount=item['amount'],
-                    original_line=item['original_line'],
-                    aggregate=True
-                )
-                saved_count += 1
-            
-            state.reset_input()
-            
-            await update.message.reply_text(
-                f"✅ Сохранено: клуб {state.club}, дата {parsed_date}\n"
-                f"Записей: {saved_count}",
-                reply_markup=get_main_keyboard()
-            )
+            # Переходим в режим ожидания действия (ЗАПИСАТЬ/ИЗМЕНИТЬ/ОТМЕНА)
+            state.mode = 'awaiting_preview_action'
             return
         else:
             await update.message.reply_text(
@@ -300,6 +278,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Введите дату (формат: 30,10) или напишите: отмена"
             )
             return
+    
+    # Обработка действий в режиме предпросмотра
+    if state.mode == 'awaiting_preview_action':
+        await handle_preview_action(update, state, text, text_lower)
+        return
+    
+    # Обработка ввода номера строки для редактирования
+    if state.mode == 'awaiting_edit_line_number':
+        await handle_edit_line_number(update, state, text)
+        return
+    
+    # Обработка ввода новых данных для строки
+    if state.mode == 'awaiting_edit_line_data':
+        await handle_edit_line_data(update, state, text)
+        return
     
     # Команда "обнулить"
     if text_lower == 'обнулить':
@@ -438,11 +431,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Проверка воронок (пользователь не может переключиться пока не завершит)
     active_modes = [
-        'awaiting_date', 'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
+        'awaiting_preview_date', 'awaiting_preview_action', 'awaiting_edit_line_number', 'awaiting_edit_line_data',
+        'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
         'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
         'awaiting_export_club', 'awaiting_export_period',
         'awaiting_merge_confirm', 'awaiting_reset_pin',
-        'awaiting_list_club', 'awaiting_list_date'
+        'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input'
     ]
     
     if state.mode in active_modes and text_lower == 'отмена':
@@ -511,34 +505,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Показываем все принятые данные
-        response_parts = []
-        response_parts.append(f"📊 Принятые данные по клубу {state.club}:\n")
+        # Показываем предпросмотр данных
+        await show_data_preview(update, state, show_duplicates=True)
         
-        total_nal = 0
-        total_beznal = 0
-        
-        if state.temp_nal_data:
-            response_parts.append("📗 НАЛ:")
-            for item in state.temp_nal_data:
-                response_parts.append(f"  {item['code']} {item['name']} — {item['amount']:.0f}")
-                total_nal += item['amount']
-            response_parts.append(f"  Итого НАЛ: {total_nal:.0f}\n")
-        
-        if state.temp_beznal_data:
-            response_parts.append("📘 БЕЗНАЛ:")
-            for item in state.temp_beznal_data:
-                response_parts.append(f"  {item['code']} {item['name']} — {item['amount']:.0f}")
-                total_beznal += item['amount']
-            response_parts.append(f"  Итого БЕЗНАЛ: {total_beznal:.0f}\n")
-        
-        response_parts.append(f"💰 Всего: {total_nal + total_beznal:.0f}")
-        response_parts.append("\n📅 Укажите дату (формат: 30,10 или 30.10):")
-        
-        await update.message.reply_text('\n'.join(response_parts))
-        
-        # Переходим в режим ожидания даты
-        state.mode = 'awaiting_date'
+        # Переходим в режим ожидания даты (сначала нужно указать дату)
+        state.mode = 'awaiting_preview_date'
         return
     
     # Блочный ввод данных (но проверяем сначала - это не команда/кнопка!)
@@ -1498,24 +1469,56 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     duplicates = data['duplicates']
     operations = data['operations']
     
-    # Обработка ответа
-    if text_lower == 'ок' or text_lower == 'ok':
-        # Объединяем все дубликаты
-        exclude_indices = []
-    else:
-        # Парсим номера для исключения
+    # Обработка ответа с новой логикой
+    indices_to_merge = set()
+    
+    # Убираем знаки препинания для удобства парсинга: "не1,2" -> "не 1 2"
+    normalized_text = text_lower.replace(',', ' ').replace('.', ' ')
+    parts = normalized_text.split()
+    
+    if not parts:
+        await update.message.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
+        return
+    
+    command = parts[0]
+    
+    if command in ['ок', 'ok']:
+        # "ок" без номеров -> объединить ВСЕ
+        if len(parts) == 1:
+            indices_to_merge = set(range(len(duplicates)))
+        else:
+            # "ок 1 2" -> объединить ТОЛЬКО указанные
+            try:
+                indices_to_merge = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            except:
+                await update.message.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
+                return
+    elif command in ['не', 'net', 'нет']:
+        # "не 1 2" -> НЕ объединять указанные (объединить остальные)
         try:
-            exclude_indices = [int(x.strip()) - 1 for x in text.replace(',', ' ').split() if x.strip().isdigit()]
+            exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            indices_to_merge = set(range(len(duplicates))) - exclude_indices
         except:
-            await update.message.reply_text("❌ Неверный формат. Используйте: ок или 1,2")
+            await update.message.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
             return
+    else:
+        await update.message.reply_text(
+            "❌ Неверная команда.\n\n"
+            "Используйте:\n"
+            "• ок - объединить все\n"
+            "• ок 1 - объединить только пункт 1\n"
+            "• ок 1 2 - объединить пункты 1 и 2\n"
+            "• не 1 - НЕ объединять пункт 1 (остальные объединить)\n"
+            "• не 1 2 - НЕ объединять пункты 1 и 2"
+        )
+        return
     
     # Объединяем операции
     merged_operations = []
     codes_to_merge = set()
     
     for i, dup in enumerate(duplicates):
-        if i not in exclude_indices:
+        if i in indices_to_merge:
             codes_to_merge.add(dup['code'])
     
     # Обрабатываем операции
@@ -1880,6 +1883,328 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text("❌ Нет записей для удаления")
         
         state.mode = None
+
+
+def check_internal_duplicates(nal_data: list, beznal_data: list) -> list:
+    """
+    Проверка дубликатов внутри вводимых данных
+    Возвращает список дубликатов (один код с именем и без имени)
+    """
+    from collections import defaultdict
+    
+    all_data = nal_data + beznal_data
+    by_code = defaultdict(lambda: {'with_name': [], 'without_name': []})
+    
+    for item in all_data:
+        code = item['code']
+        if item['name']:
+            by_code[code]['with_name'].append(item)
+        else:
+            by_code[code]['without_name'].append(item)
+    
+    # Ищем коды где есть И с именем И без имени
+    duplicates = []
+    for code, data in by_code.items():
+        if data['with_name'] and data['without_name']:
+            duplicates.append({
+                'code': code,
+                'with_name': data['with_name'],
+                'without_name': data['without_name']
+            })
+    
+    return duplicates
+
+
+async def show_data_preview(update: Update, state: UserState, show_duplicates: bool = True):
+    """Показать предпросмотр данных перед записью"""
+    response_parts = []
+    response_parts.append(f"📋 ПРЕДПРОСМОТР ДАННЫХ\n")
+    response_parts.append(f"Клуб: {state.club}")
+    
+    if state.preview_date:
+        response_parts.append(f"Дата: {state.preview_date}\n")
+    
+    # Показываем все данные с номерами строк
+    line_num = 1
+    total_nal = 0
+    total_beznal = 0
+    
+    if state.temp_nal_data:
+        response_parts.append("📗 НАЛ:")
+        for item in state.temp_nal_data:
+            response_parts.append(f"  {line_num}. {item['code']} {item['name']} — {item['amount']:.0f}")
+            total_nal += item['amount']
+            line_num += 1
+        response_parts.append(f"  Итого НАЛ: {total_nal:.0f}\n")
+    
+    if state.temp_beznal_data:
+        response_parts.append("📘 БЕЗНАЛ:")
+        for item in state.temp_beznal_data:
+            response_parts.append(f"  {line_num}. {item['code']} {item['name']} — {item['amount']:.0f}")
+            total_beznal += item['amount']
+            line_num += 1
+        response_parts.append(f"  Итого БЕЗНАЛ: {total_beznal:.0f}\n")
+    
+    response_parts.append(f"💰 Всего: {total_nal + total_beznal:.0f}\n")
+    
+    # Проверка на дубликаты
+    if show_duplicates:
+        duplicates = check_internal_duplicates(state.temp_nal_data, state.temp_beznal_data)
+        
+        if duplicates:
+            response_parts.append("⚠️ ВНИМАНИЕ! Найдены возможные дубликаты:\n")
+            for i, dup in enumerate(duplicates, 1):
+                response_parts.append(f"{i}. Код: {dup['code']}")
+                
+                # С именем
+                names_with = set(item['name'] for item in dup['with_name'])
+                for name in names_with:
+                    items = [item for item in dup['with_name'] if item['name'] == name]
+                    nal_sum = sum(item['amount'] for item in items if item in state.temp_nal_data)
+                    bez_sum = sum(item['amount'] for item in items if item in state.temp_beznal_data)
+                    response_parts.append(f"   • {name}: НАЛ {nal_sum:.0f}, БЕЗНАЛ {bez_sum:.0f}")
+                
+                # Без имени
+                nal_no = sum(item['amount'] for item in dup['without_name'] if item in state.temp_nal_data)
+                bez_no = sum(item['amount'] for item in dup['without_name'] if item in state.temp_beznal_data)
+                response_parts.append(f"   • (без имени): НАЛ {nal_no:.0f}, БЕЗНАЛ {bez_no:.0f}")
+                response_parts.append("")
+            
+            state.preview_duplicates = duplicates
+    
+    # Команды для пользователя
+    if not state.preview_date:
+        response_parts.append("📅 Укажите дату (формат: 30,10 или 30.10):")
+    else:
+        response_parts.append("Выберите действие:")
+        response_parts.append("• ЗАПИСАТЬ - сохранить данные")
+        response_parts.append("• ИЗМЕНИТЬ - редактировать строку")
+        response_parts.append("• ОТМЕНА - отменить всё")
+        
+        if state.preview_duplicates:
+            response_parts.append("\n🔄 Для дубликатов напишите:")
+            response_parts.append("• ОК - объединить все")
+            response_parts.append("• ОК 1 - объединить пункт 1")
+            response_parts.append("• НЕ 1 - не объединять пункт 1")
+    
+    await update.message.reply_text('\n'.join(response_parts))
+
+
+async def handle_preview_action(update: Update, state: UserState, text: str, text_lower: str):
+    """Обработка действий в режиме предпросмотра"""
+    
+    # Проверяем команды объединения дубликатов
+    if state.preview_duplicates and (text_lower.startswith('ок') or text_lower.startswith('не')):
+        await handle_preview_duplicates(update, state, text_lower)
+        return
+    
+    # ЗАПИСАТЬ - сохранение данных
+    if text_lower == 'записать':
+        await save_preview_data(update, state)
+        return
+    
+    # ИЗМЕНИТЬ - редактирование строки
+    if text_lower == 'изменить':
+        await update.message.reply_text(
+            "📝 Введите номер строки для редактирования:\n\n"
+            "Например: 1"
+        )
+        state.mode = 'awaiting_edit_line_number'
+        return
+    
+    # ОТМЕНА
+    if text_lower == 'отмена' or text_lower == '❌ отмена':
+        state.reset_input()
+        await update.message.reply_text(
+            "❌ Ввод данных отменён. Данные не сохранены.\n"
+            "Начните заново: нал / безнал",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
+    # Неизвестная команда
+    await update.message.reply_text(
+        "❓ Используйте команды:\n"
+        "• ЗАПИСАТЬ\n"
+        "• ИЗМЕНИТЬ\n"
+        "• ОТМЕНА"
+    )
+
+
+async def handle_preview_duplicates(update: Update, state: UserState, text_lower: str):
+    """Обработка объединения дубликатов в предпросмотре"""
+    duplicates = state.preview_duplicates
+    
+    if not duplicates:
+        await update.message.reply_text("❌ Дубликаты не найдены")
+        return
+    
+    # Парсим команду
+    normalized_text = text_lower.replace(',', ' ').replace('.', ' ')
+    parts = normalized_text.split()
+    
+    if not parts:
+        await update.message.reply_text("❌ Неверный формат")
+        return
+    
+    command = parts[0]
+    indices_to_merge = set()
+    
+    if command in ['ок', 'ok']:
+        if len(parts) == 1:
+            # Объединить все
+            indices_to_merge = set(range(len(duplicates)))
+        else:
+            # Объединить указанные
+            try:
+                indices_to_merge = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            except:
+                await update.message.reply_text("❌ Неверный формат номеров")
+                return
+    elif command in ['не', 'нет']:
+        # Не объединять указанные
+        try:
+            exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            indices_to_merge = set(range(len(duplicates))) - exclude_indices
+        except:
+            await update.message.reply_text("❌ Неверный формат номеров")
+            return
+    
+    # Объединяем дубликаты
+    for i, dup in enumerate(duplicates):
+        if i in indices_to_merge:
+            code = dup['code']
+            # Берём имя из записи с именем
+            if dup['with_name']:
+                merged_name = dup['with_name'][0]['name']
+                
+                # Обновляем записи без имени
+                for item in dup['without_name']:
+                    item['name'] = merged_name
+    
+    # Убираем дубликаты из списка
+    state.preview_duplicates = None
+    
+    await update.message.reply_text("✅ Дубликаты объединены\n")
+    
+    # Показываем обновлённый предпросмотр
+    await show_data_preview(update, state, show_duplicates=True)
+
+
+async def handle_edit_line_number(update: Update, state: UserState, text: str):
+    """Обработка ввода номера строки для редактирования"""
+    try:
+        line_num = int(text.strip())
+        
+        # Проверяем диапазон
+        total_lines = len(state.temp_nal_data) + len(state.temp_beznal_data)
+        
+        if line_num < 1 or line_num > total_lines:
+            await update.message.reply_text(
+                f"❌ Неверный номер строки. Введите число от 1 до {total_lines}"
+            )
+            return
+        
+        # Находим строку
+        if line_num <= len(state.temp_nal_data):
+            item = state.temp_nal_data[line_num - 1]
+            channel = 'нал'
+            index = line_num - 1
+        else:
+            item = state.temp_beznal_data[line_num - len(state.temp_nal_data) - 1]
+            channel = 'безнал'
+            index = line_num - len(state.temp_nal_data) - 1
+        
+        # Показываем текущие данные
+        await update.message.reply_text(
+            f"📝 Редактирование строки {line_num}:\n\n"
+            f"Текущие данные: {item['code']} {item['name']} {item['amount']:.0f}\n"
+            f"Канал: {channel.upper()}\n\n"
+            f"Введите новые данные в формате:\n"
+            f"КОД ИМЯ СУММА\n\n"
+            f"Например: Д7 Юля 10000"
+        )
+        
+        state.edit_line_number = line_num
+        state.mode = 'awaiting_edit_line_data'
+        
+    except ValueError:
+        await update.message.reply_text("❌ Введите корректный номер строки")
+
+
+async def handle_edit_line_data(update: Update, state: UserState, text: str):
+    """Обработка ввода новых данных для строки"""
+    from parser import DataParser
+    
+    # Парсим новую строку
+    success, data, error = DataParser.parse_line(text, 1)
+    
+    if not success:
+        await update.message.reply_text(f"❌ {error}\n\nПопробуйте ещё раз")
+        return
+    
+    # Определяем в каком списке находится строка
+    line_num = state.edit_line_number
+    
+    if line_num <= len(state.temp_nal_data):
+        # Обновляем в НАЛ
+        state.temp_nal_data[line_num - 1] = data
+    else:
+        # Обновляем в БЕЗНАЛ
+        index = line_num - len(state.temp_nal_data) - 1
+        state.temp_beznal_data[index] = data
+    
+    await update.message.reply_text("✅ Строка обновлена\n")
+    
+    # Очищаем редактирование
+    state.edit_line_number = None
+    state.mode = 'awaiting_preview_action'
+    
+    # Показываем обновлённый предпросмотр
+    await show_data_preview(update, state, show_duplicates=True)
+
+
+async def save_preview_data(update: Update, state: UserState):
+    """Сохранение данных из предпросмотра в БД"""
+    if not state.preview_date:
+        await update.message.reply_text("❌ Дата не указана")
+        return
+    
+    saved_count = 0
+    
+    for item in state.temp_nal_data:
+        db.add_or_update_operation(
+            club=state.club,
+            date=state.preview_date,
+            code=item['code'],
+            name=item['name'],
+            channel='нал',
+            amount=item['amount'],
+            original_line=item['original_line'],
+            aggregate=True
+        )
+        saved_count += 1
+    
+    for item in state.temp_beznal_data:
+        db.add_or_update_operation(
+            club=state.club,
+            date=state.preview_date,
+            code=item['code'],
+            name=item['name'],
+            channel='безнал',
+            amount=item['amount'],
+            original_line=item['original_line'],
+            aggregate=True
+        )
+        saved_count += 1
+    
+    state.reset_input()
+    
+    await update.message.reply_text(
+        f"✅ Сохранено: клуб {state.club}, дата {state.preview_date}\n"
+        f"Записей: {saved_count}",
+        reply_markup=get_main_keyboard()
+    )
 
 
 def main():
