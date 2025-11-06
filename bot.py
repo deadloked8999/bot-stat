@@ -259,17 +259,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
         return
     
-    # НОВАЯ ЛОГИКА: обработка предпросмотра и ввода даты
-    if state.mode == 'awaiting_preview_date':
-        if text_lower == 'отмена' or text_lower == '❌ отмена':
+    # УНИВЕРСАЛЬНАЯ КНОПКА ОТМЕНА - работает на ЛЮБОМ этапе!
+    # Проверяем ПЕРЕД всеми режимами
+    if text_lower == 'отмена' or text_lower == '❌ отмена':
+        # Список режимов где ОТМЕНА должна работать
+        cancelable_modes = [
+            'awaiting_preview_date', 'awaiting_preview_action', 'awaiting_edit_line_number', 'awaiting_edit_line_data',
+            'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
+            'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
+            'awaiting_export_club', 'awaiting_export_period',
+            'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input',
+            'нал', 'безнал'
+        ]
+        
+        if state.mode in cancelable_modes or state.has_data():
+            # Полная очистка (но клуб остаётся!)
+            saved_club = state.club  # Сохраняем клуб
             state.reset_input()
+            state.mode = None
+            state.duplicate_check_data = None
+            state.report_club = None
+            state.export_club = None
+            state.list_club = None
+            state.edit_code = None
+            state.edit_date = None
+            state.edit_current_data = None
+            state.delete_code = None
+            state.delete_date = None
+            state.delete_records = None
+            state.merge_candidates = None
+            state.merge_period = None
+            state.club = saved_club  # Восстанавливаем клуб
+            
             await update.message.reply_text(
-                "❌ Ввод данных отменён. Данные не сохранены.\n"
-                "Начните заново: нал / безнал",
+                f"❌ Операция отменена\n\n"
+                f"🏢 Клуб: {state.club}\n"
+                f"Используйте кнопки меню:",
                 reply_markup=get_main_keyboard()
             )
             return
-        
+    
+    # НОВАЯ ЛОГИКА: обработка предпросмотра и ввода даты
+    if state.mode == 'awaiting_preview_date':
         # Пытаемся распарсить дату
         success, parsed_date, error = parse_short_date(text)
         if success:
@@ -464,26 +495,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка подтверждения объединения дубликатов
     if state.mode == 'awaiting_duplicate_confirm':
         await handle_duplicate_confirmation(update, context, state, text, text_lower)
-        return
-    
-    # Проверка воронок (пользователь не может переключиться пока не завершит)
-    active_modes = [
-        'awaiting_preview_date', 'awaiting_preview_action', 'awaiting_edit_line_number', 'awaiting_edit_line_data',
-        'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
-        'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
-        'awaiting_export_club', 'awaiting_export_period',
-        'awaiting_merge_confirm', 'awaiting_reset_pin',
-        'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input'
-    ]
-    
-    if state.mode in active_modes and text_lower == 'отмена':
-        state.mode = None
-        state.reset_input()
-        await update.message.reply_text(
-            "❌ Операция отменена.\n"
-            "Введите команду заново или напишите: помощь",
-            reply_markup=get_main_keyboard() if state.club else ReplyKeyboardRemove()
-        )
         return
     
     # Команда "старт москвич" или "старт анора" (обработка как текст)
@@ -2223,16 +2234,6 @@ async def handle_preview_action(update: Update, state: UserState, text: str, tex
             f"Например: 1"
         )
         state.mode = 'awaiting_edit_line_number'
-        return
-    
-    # ОТМЕНА
-    if text_lower == 'отмена' or text_lower == '❌ отмена':
-        state.reset_input()
-        await update.message.reply_text(
-            "❌ Ввод данных отменён. Данные не сохранены.\n"
-            "Начните заново: нал / безнал",
-            reply_markup=get_main_keyboard()
-        )
         return
     
     # Неизвестная команда
