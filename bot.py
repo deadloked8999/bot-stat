@@ -1451,6 +1451,13 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
     # Преобразуем в формат excluded (для совместимости с generate_merged_report)
     excluded = set(range(len(state.merge_candidates))) - indices_to_merge
     
+    # Уведомление о начале генерации
+    merged_count = len(indices_to_merge)
+    await update.message.reply_text(
+        f"⏳ Генерация сводного отчёта...\n"
+        f"Объединяется: {merged_count} из {len(state.merge_candidates)}"
+    )
+    
     # Генерируем сводный отчет
     await generate_merged_report(update, state, excluded)
     
@@ -1463,11 +1470,15 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
 
 async def generate_merged_report(update: Update, state: UserState, excluded: set):
     """Генерация сводного отчета из ОБОИХ клубов"""
-    date_from, date_to = state.merge_period
-    
-    # Получаем ВСЕ данные обоих клубов
-    ops_m = db.get_operations_by_period('Москвич', date_from, date_to)
-    ops_a = db.get_operations_by_period('Анора', date_from, date_to)
+    try:
+        date_from, date_to = state.merge_period
+        
+        # Получаем ВСЕ данные обоих клубов
+        ops_m = db.get_operations_by_period('Москвич', date_from, date_to)
+        ops_a = db.get_operations_by_period('Анора', date_from, date_to)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка получения данных: {str(e)}")
+        return
     
     # Создаём объединённый список операций для СВОДНОГО отчёта
     merged_ops = []
@@ -1529,24 +1540,31 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
     
     # Генерируем СВОДНЫЙ отчет
     if merged_ops:
-        report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_ops)
-        report_text = ReportGenerator.format_report_text(
-            report_rows, totals, check_ok, totals_recalc, 
-            "📊 СВОДНЫЙ ОТЧЁТ (Москвич + Анора)", f"{date_from} .. {date_to}"
-        )
-        await update.message.reply_text(report_text, parse_mode='Markdown')
+        try:
+            report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_ops)
+            report_text = ReportGenerator.format_report_text(
+                report_rows, totals, check_ok, totals_recalc, 
+                "📊 СВОДНЫЙ ОТЧЁТ (Москвич + Анора)", f"{date_from} .. {date_to}"
+            )
+            await update.message.reply_text(report_text, parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка генерации отчёта: {str(e)}")
+            return
         
         # Экспорт сводного
-        filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
-        ReportGenerator.generate_xlsx(
-            report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename
-        )
-        with open(filename, 'rb') as f:
-            await update.message.reply_document(
-                document=f, filename=filename,
-                caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}"
+        try:
+            filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
+            ReportGenerator.generate_xlsx(
+                report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename
             )
-        os.remove(filename)
+            with open(filename, 'rb') as f:
+                await update.message.reply_document(
+                    document=f, filename=filename,
+                    caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}"
+                )
+            os.remove(filename)
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Отчёт показан, но ошибка создания Excel: {str(e)}")
     else:
         await update.message.reply_text("ℹ️ Нет данных для сводного отчета")
 
