@@ -636,14 +636,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Сначала отчеты по каждому клубу
             for club in ['Москвич', 'Анора']:
                 await generate_and_send_report(update, club, date_from, date_to, state)
+                # Если generate_and_send_report установил режим awaiting_duplicate_confirm - выходим
+                if state.mode == 'awaiting_duplicate_confirm':
+                    return
             
             # Затем проверяем возможность сводного отчета
             await prepare_merged_report(update, state, date_from, date_to)
         else:
             club = 'Москвич' if state.report_club == 'москвич' else 'Анора'
             await generate_and_send_report(update, club, date_from, date_to, state)
-            state.mode = None
-            state.report_club = None
+            
+            # НЕ сбрасываем режим если ждём подтверждения дубликатов!
+            if state.mode != 'awaiting_duplicate_confirm':
+                state.mode = None
+                state.report_club = None
         return
     
     # Обработка подтверждения объединения для сводного отчета
@@ -1634,6 +1640,7 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     # Очищаем состояние
     state.mode = None
     state.duplicate_check_data = None
+    state.report_club = None
 
 
 async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str, 
