@@ -1638,8 +1638,8 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     club_translit = 'moskvich' if data['club'] == 'Москвич' else 'anora'
     filename = f"otchet_{club_translit}_{data['date_from']}_{data['date_to']}.xlsx"
     
-    ReportGenerator.generate_xlsx(filename, report_rows, totals, data['club'], 
-                                  f"{data['date_from']} .. {data['date_to']}")
+    ReportGenerator.generate_xlsx(report_rows, totals, data['club'], 
+                                  f"{data['date_from']} .. {data['date_to']}", filename)
     
     with open(filename, 'rb') as f:
         await update.message.reply_document(
