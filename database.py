@@ -284,6 +284,45 @@ class Database:
         conn.close()
         return True, f"Удалено: {code} {channel} {old_amount} ({date})"
     
+    def delete_operations_by_period(self, club: str, date_from: str, date_to: str) -> int:
+        """
+        Массовое удаление операций за период по клубу
+        Возвращает количество удалённых записей
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT code, channel, amount, date
+            FROM operations
+            WHERE club = ? AND date >= ? AND date <= ?
+        """, (club, date_from, date_to))
+        rows = cursor.fetchall()
+        
+        if not rows:
+            conn.close()
+            return 0
+        
+        deleted_count = len(rows)
+        created_at = datetime.now().isoformat()
+        
+        # Журналируем удаление каждой записи
+        for code, channel, amount, op_date in rows:
+            cursor.execute("""
+                INSERT INTO edit_log (club, date, code, channel, action, old_value, new_value, edited_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (club, op_date, code, channel, 'bulk_delete', amount, None, created_at))
+        
+        # Удаляем записи
+        cursor.execute("""
+            DELETE FROM operations
+            WHERE club = ? AND date >= ? AND date <= ?
+        """, (club, date_from, date_to))
+        
+        conn.commit()
+        conn.close()
+        return deleted_count
+    
     def get_employee_payments(self, code: str, date_from: str, date_to: str, 
                              club: Optional[str] = None) -> List[Dict]:
         """

@@ -4,7 +4,7 @@
 import os
 import re
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
@@ -68,6 +68,10 @@ class UserState:
         self.delete_code: Optional[str] = None
         self.delete_date: Optional[str] = None
         self.delete_records: Optional[dict] = None
+        self.delete_mass_club: Optional[str] = None
+        self.delete_mass_date_from: Optional[str] = None
+        self.delete_mass_date_to: Optional[str] = None
+        self.delete_mass_preview: Optional[dict] = None
         
         # Для команды экспорт
         self.export_club: Optional[str] = None
@@ -98,6 +102,10 @@ class UserState:
         self.preview_date = None
         self.preview_duplicates = None
         self.edit_line_number = None
+        self.delete_mass_club = None
+        self.delete_mass_date_from = None
+        self.delete_mass_date_to = None
+        self.delete_mass_preview = None
     
     def has_data(self) -> bool:
         """Проверка наличия данных"""
@@ -270,6 +278,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
             'awaiting_export_club', 'awaiting_export_period',
             'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input',
+            'awaiting_delete_mass_club', 'awaiting_delete_mass_period', 'awaiting_delete_mass_confirm',
             'нал', 'безнал'
         ]
         
@@ -299,6 +308,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_main_keyboard()
             )
             return
+    
+    if state.mode == 'awaiting_delete_mass_club':
+        await handle_delete_mass_club_input(update, state, text, text_lower)
+        return
+    
+    if state.mode == 'awaiting_delete_mass_period':
+        await handle_delete_mass_period_input(update, state, text, text_lower)
+        return
+    
+    if state.mode == 'awaiting_delete_mass_confirm':
+        await handle_delete_mass_confirm(update, state, text_lower)
+        return
     
     # НОВАЯ ЛОГИКА: обработка предпросмотра и ввода даты
     if state.mode == 'awaiting_preview_date':
@@ -465,7 +486,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📝 ПРОСМОТР И РЕДАКТИРОВАНИЕ:\n"
             "• СПИСОК → клуб → дата (посмотреть все записи)\n"
             "• ИСПРАВИТЬ → код + дата (Д7 3,10)\n"
-            "• УДАЛИТЬ → код + дата (Д7 3,10)\n\n"
+            "• УДАЛИТЬ → код + дата (Д7 3,10)\n"
+            "• УДАЛИТЬ ВСЕ → клуб → дата/период (массовое удаление)\n\n"
             "📤 ЭКСПОРТ:\n"
             "• ЭКСПОРТ → клуб → период → Excel файл\n\n"
             "📜 ЖУРНАЛ ИЗМЕНЕНИЙ:\n"
@@ -779,7 +801,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Формат: удалить КОД дата\n\n"
                 "Примеры:\n"
                 "• удалить Д7 12,12\n"
-                "• удалить Д1 30,10"
+                "• удалить Д1 30,10\n\n"
+                "Массовое удаление:\n"
+                "• удалить все"
             )
         else:
             await handle_delete_command_new(update, context, state, text)
@@ -1170,12 +1194,22 @@ async def handle_delete_command_new(update: Update, context: ContextTypes.DEFAUL
         )
         return
     
+    text_lower = normalize_command(text)
+    if text_lower in ['удалить все', 'удалить всё']:
+        await update.message.reply_text(
+            "🏢 Выберите клуб для удаления данных:",
+            reply_markup=get_club_report_keyboard()
+        )
+        state.mode = 'awaiting_delete_mass_club'
+        return
+    
     # Формат: удалить Д1 30,10
     parts = text.split()
     if len(parts) < 3:
         await update.message.reply_text(
             "❌ Неверный формат.\n"
-            "Пример: удалить Д1 30,10"
+            "Пример: удалить Д1 30,10\n"
+            "Или напишите: удалить все"
         )
         return
     
@@ -1253,6 +1287,228 @@ async def handle_delete_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     
     # Очищаем состояние
     state.mode = None
+
+
+def _summarize_operations_for_delete(operations: list) -> Dict:
+    """Возвращает агрегаты по списку операций"""
+    total_nal = sum(op['amount'] for op in operations if op['channel'] == 'нал')
+    total_beznal = sum(op['amount'] for op in operations if op['channel'] == 'безнал')
+    return {
+        'count': len(operations),
+        'total_nal': total_nal,
+        'total_beznal': total_beznal
+    }
+
+
+def _format_delete_preview_lines(club_label: str, date_from: str, date_to: str,
+                                 operations: list) -> Tuple[str, Dict]:
+    """Формирует текст предпросмотра удаления и возвращает агрегаты"""
+    summary = _summarize_operations_for_delete(operations)
+    lines = []
+    lines.append(f"🏢 {club_label}")
+    lines.append(f"📅 Период: {date_from} .. {date_to}")
+    lines.append(f"🧾 Записей: {summary['count']}")
+    lines.append(f"💵 НАЛ: {summary['total_nal']:,.0f}".replace(',', ' '))
+    lines.append(f"💳 БЕЗНАЛ: {summary['total_beznal']:,.0f}".replace(',', ' '))
+    
+    if operations:
+        lines.append("Первые записи:")
+        for op in operations[:5]:
+            code = op['code']
+            name = op['name'] or "(без имени)"
+            channel = op['channel'].upper()
+            amount = f"{op['amount']:,.0f}".replace(',', ' ')
+            lines.append(f" • {op['date']} | {code} {name} | {channel} {amount}")
+        if len(operations) > 5:
+            lines.append(f" • ... и ещё {len(operations) - 5} записей")
+    else:
+        lines.append("Нет записей за выбранный период.")
+    
+    return '\n'.join(lines), summary
+
+
+async def handle_delete_mass_club_input(update: Update, state: UserState,
+                                        text: str, text_lower: str):
+    """Выбор клуба для массового удаления"""
+    club_map = {
+        'москвич': 'москвич',
+        'анора': 'анора',
+        'оба': 'оба'
+    }
+    
+    normalized = text_lower
+    if normalized in ['🏢 москвич', 'москвич']:
+        selection = 'москвич'
+    elif normalized in ['🏢 анора', 'анора', 'anora']:
+        selection = 'анора'
+    elif normalized in ['🏢🏢 оба', 'оба']:
+        selection = 'оба'
+    else:
+        await update.message.reply_text(
+            "❌ Неверный выбор. Напишите: москвич, анора или оба"
+        )
+        return
+    
+    state.delete_mass_club = selection
+    state.delete_mass_date_from = None
+    state.delete_mass_date_to = None
+    state.delete_mass_preview = None
+    await update.message.reply_text(
+        "📅 Укажите дату или период для удаления:\n\n"
+        "Примеры:\n"
+        "• 5,11\n"
+        "• 2,11-5,11"
+    )
+    state.mode = 'awaiting_delete_mass_period'
+
+
+async def handle_delete_mass_period_input(update: Update, state: UserState,
+                                          text: str, text_lower: str):
+    """Обработка ввода даты/периода для массового удаления"""
+    if '-' in text:
+        success, date_from, date_to, error = parse_date_range(text)
+        if not success:
+            await update.message.reply_text(f"❌ {error}")
+            return
+    else:
+        success, single_date, error = parse_short_date(text)
+        if not success:
+            await update.message.reply_text(f"❌ {error}")
+            return
+        date_from = single_date
+        date_to = single_date
+    
+    selection = state.delete_mass_club
+    club_labels = []
+    if selection == 'оба':
+        club_labels = [('Москвич', 'Москвич'), ('Анора', 'Анора')]
+    else:
+        label = 'Москвич' if selection == 'москвич' else 'Анора'
+        club_labels = [(label, label)]
+    
+    preview_sections = []
+    preview_data = []
+    total_records = 0
+    
+    for club_key, club_label in club_labels:
+        operations = db.get_operations_by_period(club_label, date_from, date_to)
+        if operations:
+            section_text, summary = _format_delete_preview_lines(club_label, date_from, date_to, operations)
+            preview_sections.append(section_text)
+            preview_data.append({
+                'club': club_label,
+                'summary': summary
+            })
+            total_records += summary['count']
+        else:
+            preview_sections.append(
+                f"🏢 {club_label}\n"
+                f"📅 Период: {date_from} .. {date_to}\n"
+                "Нет записей за выбранный период."
+            )
+    
+    if total_records == 0:
+        await update.message.reply_text(
+            "ℹ️ За указанный период данных нет.\n"
+            "Удаление не требуется."
+        )
+        # Сброс
+        state.mode = None
+        state.delete_mass_club = None
+        return
+    
+    # Сохраняем параметры
+    state.delete_mass_date_from = date_from
+    state.delete_mass_date_to = date_to
+    state.delete_mass_preview = {
+        'clubs': preview_data,
+        'total_records': total_records
+    }
+    
+    await update.message.reply_text(
+        "📊 Предпросмотр удаления:\n\n" + '\n\n'.join(preview_sections)
+    )
+    
+    await update.message.reply_text(
+        "❗ Подтвердите удаление всех записей за этот период.\n"
+        "Напишите: да / нет"
+    )
+    state.mode = 'awaiting_delete_mass_confirm'
+
+
+async def handle_delete_mass_confirm(update: Update, state: UserState, text_lower: str):
+    """Подтверждение массового удаления"""
+    if text_lower in ['да', 'ok', 'ок', 'yes', 'y']:
+        selection = state.delete_mass_club
+        date_from = state.delete_mass_date_from
+        date_to = state.delete_mass_date_to
+        preview = state.delete_mass_preview or {}
+        
+        results = []
+        total_deleted = 0
+        
+        clubs_to_process = []
+        if selection == 'оба':
+            clubs_to_process = ['Москвич', 'Анора']
+        else:
+            clubs_to_process = ['Москвич' if selection == 'москвич' else 'Анора']
+        
+        for club in clubs_to_process:
+            deleted = db.delete_operations_by_period(club, date_from, date_to)
+            total_deleted += deleted
+            summary = None
+            if preview:
+                for item in preview.get('clubs', []):
+                    if item['club'] == club:
+                        summary = item['summary']
+                        break
+            results.append({
+                'club': club,
+                'deleted': deleted,
+                'summary': summary
+            })
+        
+        lines = []
+        if total_deleted == 0:
+            lines.append("ℹ️ Записей для удаления не найдено.")
+        else:
+            lines.append("🗑️ Удаление завершено!")
+            lines.append(f"📅 Период: {date_from} .. {date_to}")
+            lines.append(f"🧾 Удалено записей: {total_deleted}")
+            lines.append("")
+            for item in results:
+                summary = item['summary']
+                lines.append(f"🏢 {item['club']}")
+                lines.append(f"Удалено записей: {item['deleted']}")
+                if summary:
+                    lines.append(f"НАЛ: {summary['total_nal']:,.0f}".replace(',', ' '))
+                    lines.append(f"БЕЗНАЛ: {summary['total_beznal']:,.0f}".replace(',', ' '))
+                lines.append("")
+            lines.append("📜 История доступна в ЖУРНАЛ.")
+        
+        await update.message.reply_text('\n'.join(line for line in lines if line))
+        
+        # Сброс
+        state.mode = None
+        state.delete_mass_club = None
+        state.delete_mass_date_from = None
+        state.delete_mass_date_to = None
+        state.delete_mass_preview = None
+        return
+    
+    if text_lower in ['нет', 'no', 'n', 'отмена', 'cancel']:
+        await update.message.reply_text("✅ Удаление отменено.")
+        state.mode = None
+        state.delete_mass_club = None
+        state.delete_mass_date_from = None
+        state.delete_mass_date_to = None
+        state.delete_mass_preview = None
+        return
+    
+    await update.message.reply_text(
+        "❓ Не понял. Напишите: да / нет\n"
+        "Для отмены напишите: отмена"
+    )
 
 
 async def export_report(update: Update, club: str, date_from: str, date_to: str):
