@@ -3,8 +3,10 @@
 """
 import os
 import re
+import uuid
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
+from openpyxl import Workbook
 
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
@@ -181,6 +183,26 @@ def get_delete_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
+def get_delete_mode_keyboard():
+    """Клавиатура выбора режима удаления"""
+    keyboard = [
+        [InlineKeyboardButton("🧍 Удалить сотрудника", callback_data='delete_mode_employee')],
+        [InlineKeyboardButton("🗑️ Удалить все", callback_data='delete_mode_mass')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_delete_mass_confirm_keyboard():
+    """Клавиатура подтверждения массового удаления"""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Да, удалить", callback_data='delete_mass_confirm_yes'),
+            InlineKeyboardButton("❌ Нет", callback_data='delete_mass_confirm_no')
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 # Инициализация базы данных
 db = Database()
 
@@ -279,6 +301,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_export_club', 'awaiting_export_period',
             'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input',
             'awaiting_delete_mass_club', 'awaiting_delete_mass_period', 'awaiting_delete_mass_confirm',
+            'awaiting_delete_employee_input',
             'нал', 'безнал'
         ]
         
@@ -318,7 +341,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if state.mode == 'awaiting_delete_mass_confirm':
-        await handle_delete_mass_confirm(update, state, text_lower)
+        await handle_delete_mass_confirm_text(update, state, text_lower)
+        return
+
+    if state.mode == 'awaiting_delete_employee_input':
+        await handle_delete_employee_input(update, context, state, text)
         return
     
     # НОВАЯ ЛОГИКА: обработка предпросмотра и ввода даты
@@ -804,7 +831,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• удалить Д1 30,10\n\n"
                 "Массовое удаление:\n"
                 "• удалить все"
-            )
+            , reply_markup=get_delete_mode_keyboard())
         else:
             await handle_delete_command_new(update, context, state, text)
         return
@@ -1289,6 +1316,21 @@ async def handle_delete_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     state.mode = None
 
 
+async def handle_delete_employee_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       state: UserState, text: str):
+    """Обработка ввода для удаления конкретного сотрудника"""
+    cleaned = text.strip()
+    if not cleaned:
+        await update.message.reply_text(
+            "❌ Введите код и дату.\n"
+            "Пример: Д1 30,10"
+        )
+        return
+    
+    # Используем существующий обработчик, добавляя ключевое слово
+    await handle_delete_command_new(update, context, state, f"удалить {cleaned}")
+
+
 def _summarize_operations_for_delete(operations: list) -> Dict:
     """Возвращает агрегаты по списку операций"""
     total_nal = sum(op['amount'] for op in operations if op['channel'] == 'нал')
@@ -1325,6 +1367,36 @@ def _format_delete_preview_lines(club_label: str, date_from: str, date_to: str,
         lines.append("Нет записей за выбранный период.")
     
     return '\n'.join(lines), summary
+
+
+def create_delete_preview_excel(preview_data: List[Dict], filename: str):
+    """Создаёт Excel-файл с данными для удаления"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "К удалению"
+    ws.append(["Клуб", "Дата", "Код", "Имя", "Канал", "Сумма"])
+    
+    for item in preview_data:
+        club = item['club']
+        for op in item.get('operations', []):
+            ws.append([
+                club,
+                op['date'],
+                op['code'],
+                op['name'] or "",
+                op['channel'],
+                op['amount']
+            ])
+    
+    for column_cells in ws.columns:
+        max_length = 0
+        column = column_cells[0].column_letter
+        for cell in column_cells:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[column].width = max_length + 2
+    
+    wb.save(filename)
 
 
 async def handle_delete_mass_club_input(update: Update, state: UserState,
@@ -1397,7 +1469,8 @@ async def handle_delete_mass_period_input(update: Update, state: UserState,
             preview_sections.append(section_text)
             preview_data.append({
                 'club': club_label,
-                'summary': summary
+                'summary': summary,
+                'operations': operations
             })
             total_records += summary['count']
         else:
@@ -1429,16 +1502,27 @@ async def handle_delete_mass_period_input(update: Update, state: UserState,
         "📊 Предпросмотр удаления:\n\n" + '\n\n'.join(preview_sections)
     )
     
+    # Отправляем Excel с деталями
+    filename = f"delete_preview_{uuid.uuid4().hex}.xlsx"
+    create_delete_preview_excel(preview_data, filename)
+    with open(filename, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=f"preview_delete_{date_from}_{date_to}.xlsx",
+            caption="📄 Excel с данными для удаления"
+        )
+    os.remove(filename)
+    
     await update.message.reply_text(
-        "❗ Подтвердите удаление всех записей за этот период.\n"
-        "Напишите: да / нет"
+        "❗ Подтвердите удаление всех записей за этот период.",
+        reply_markup=get_delete_mass_confirm_keyboard()
     )
     state.mode = 'awaiting_delete_mass_confirm'
 
 
-async def handle_delete_mass_confirm(update: Update, state: UserState, text_lower: str):
-    """Подтверждение массового удаления"""
-    if text_lower in ['да', 'ok', 'ок', 'yes', 'y']:
+async def handle_delete_mass_confirm_message(message, state: UserState, confirmed: bool):
+    """Подтверждение массового удаления (message может быть update.message или query.message)"""
+    if confirmed:
         selection = state.delete_mass_club
         date_from = state.delete_mass_date_from
         date_to = state.delete_mass_date_to
@@ -1486,7 +1570,7 @@ async def handle_delete_mass_confirm(update: Update, state: UserState, text_lowe
                 lines.append("")
             lines.append("📜 История доступна в ЖУРНАЛ.")
         
-        await update.message.reply_text('\n'.join(line for line in lines if line))
+        await message.reply_text('\n'.join(line for line in lines if line))
         
         # Сброс
         state.mode = None
@@ -1496,8 +1580,27 @@ async def handle_delete_mass_confirm(update: Update, state: UserState, text_lowe
         state.delete_mass_preview = None
         return
     
-    if text_lower in ['нет', 'no', 'n', 'отмена', 'cancel']:
-        await update.message.reply_text("✅ Удаление отменено.")
+    await message.reply_text("✅ Удаление отменено.")
+    state.mode = None
+    state.delete_mass_club = None
+    state.delete_mass_date_from = None
+    state.delete_mass_date_to = None
+    state.delete_mass_preview = None
+
+
+async def handle_delete_mass_confirm_text(update: Update, state: UserState, text_lower: str):
+    """Фолбэк на текстовое подтверждение"""
+    if text_lower in ['да', 'ok', 'ок', 'yes', 'y']:
+        await handle_delete_mass_confirm_message(update.message, state, True)
+    elif text_lower in ['нет', 'no', 'n', 'отмена', 'cancel']:
+        await handle_delete_mass_confirm_message(update.message, state, False)
+    else:
+        await update.message.reply_text(
+            "❓ Не понял. Напишите: да / нет\n"
+            "Для отмены напишите: отмена"
+        )
+        return
+
         state.mode = None
         state.delete_mass_club = None
         state.delete_mass_date_from = None
@@ -2232,6 +2335,24 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=get_main_keyboard()
         )
     
+    # Выбор режима удаления
+    elif query.data == 'delete_mode_employee':
+        state.mode = 'awaiting_delete_employee_input'
+        await query.edit_message_text(
+            "✏️ Введите код и дату сотрудника для удаления:\n"
+            "Пример: Д1 30,10"
+        )
+    elif query.data == 'delete_mode_mass':
+        state.delete_mass_club = None
+        state.delete_mass_date_from = None
+        state.delete_mass_date_to = None
+        state.delete_mass_preview = None
+        state.mode = 'awaiting_delete_mass_club'
+        await query.edit_message_text(
+            "🏢 Выберите клуб для удаления:",
+            reply_markup=get_club_report_keyboard()
+        )
+    
     # Выбор клуба для отчёта / экспорта / списка
     elif query.data in ['report_club_moskvich', 'report_club_anora', 'report_club_both']:
         club_map = {
@@ -2259,6 +2380,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"• 30,10"
             )
             state.mode = 'awaiting_list_date'
+        elif state.mode == 'awaiting_delete_mass_club':
+            state.delete_mass_club = club_map[query.data]
+            state.delete_mass_date_from = None
+            state.delete_mass_date_to = None
+            state.delete_mass_preview = None
+            await query.edit_message_text(
+                f"Удаление ({state.delete_mass_club})\n\n"
+                f"📅 Укажите дату или период для удаления:\n"
+                f"• 5,11\n"
+                f"• 2,11-5,11"
+            )
+            state.mode = 'awaiting_delete_mass_period'
         else:
             state.report_club = club_map[query.data]
             await query.edit_message_text(
@@ -2305,6 +2438,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text("❌ Нет записей для удаления")
         
         state.mode = None
+
+    elif query.data == 'delete_mass_confirm_yes':
+        await query.edit_message_reply_markup(None)
+        await handle_delete_mass_confirm_message(query.message, state, True)
+    elif query.data == 'delete_mass_confirm_no':
+        await query.edit_message_reply_markup(None)
+        await handle_delete_mass_confirm_message(query.message, state, False)
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
