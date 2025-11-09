@@ -203,6 +203,11 @@ def get_delete_mass_confirm_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
+def make_processed_key(code: str, name: Optional[str]) -> Tuple[str, str]:
+    """Нормализованный ключ для отслеживания уже обработанных записей"""
+    return code, (name or "").strip()
+
+
 # Инициализация базы данных
 db = Database()
 
@@ -1697,7 +1702,9 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
                     'code': code,
                     'name': name,
                     'moskvich': {'nal': employees_m[code]['nal'], 'beznal': employees_m[code]['beznal']},
-                    'anora': {'nal': employees_a[code]['nal'], 'beznal': employees_a[code]['beznal']}
+                    'anora': {'nal': employees_a[code]['nal'], 'beznal': employees_a[code]['beznal']},
+                    'names_m': list(names_m),
+                    'names_a': list(names_a)
                 })
     
     if not merge_candidates:
@@ -1854,6 +1861,10 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
     for i, candidate in enumerate(state.merge_candidates):
         code = candidate['code']
         name = candidate['name']
+        names_m = candidate.get('names_m', [])
+        names_a = candidate.get('names_a', [])
+        name_variants = set(names_m + names_a)
+        name_variants.add(name)
         
         if i not in excluded:
             # ОБЪЕДИНЯЕМ - суммируем из обоих клубов
@@ -1871,7 +1882,8 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                     'amount': total_beznal, 'date': date_from
                 })
             
-            processed.add((code, name))
+            for variant in name_variants:
+                processed.add(make_processed_key(code, variant))
         else:
             # НЕ объединяем - добавляем раздельно с пометкой клуба
             if candidate['moskvich']['nal'] > 0:
@@ -1895,11 +1907,12 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                     'amount': candidate['anora']['beznal'], 'date': date_from
                 })
             
-            processed.add((code, name))
+            for variant in name_variants:
+                processed.add(make_processed_key(code, variant))
     
     # 2. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (уникальные для каждого клуба)
     for op in ops_m + ops_a:
-        if (op['code'], op['name']) not in processed:
+        if make_processed_key(op['code'], op['name']) not in processed:
             merged_ops.append(op)
     
     # Генерируем СВОДНЫЙ отчет
