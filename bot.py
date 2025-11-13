@@ -1965,7 +1965,7 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
         try:
             filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
             ReportGenerator.generate_xlsx(
-                report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename
+                report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename, db
             )
             with open(filename, 'rb') as f:
                 await update.message.reply_document(
