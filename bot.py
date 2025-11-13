@@ -139,8 +139,8 @@ def get_main_keyboard():
         ['📊 ОТЧЁТ', '💰 ВЫПЛАТЫ'],
         ['📋 СПИСОК', '📤 ЭКСПОРТ'],
         ['✏️ ИСПРАВИТЬ', '🗑️ УДАЛИТЬ'],
-        ['📜 ЖУРНАЛ', '❓ ПОМОЩЬ'],
-        ['🚪 ЗАВЕРШИТЬ']
+        ['📜 ЖУРНАЛ', '👔 САМОЗАНЯТЫЕ'],
+        ['❓ ПОМОЩЬ', '🚪 ЗАВЕРШИТЬ']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -199,6 +199,18 @@ def get_delete_mass_confirm_keyboard():
             InlineKeyboardButton("✅ Да, удалить", callback_data='delete_mass_confirm_yes'),
             InlineKeyboardButton("❌ Нет", callback_data='delete_mass_confirm_no')
         ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_self_employed_action_keyboard():
+    """Клавиатура для управления самозанятыми"""
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ Добавить код", callback_data='self_employed_add'),
+            InlineKeyboardButton("➖ Удалить код", callback_data='self_employed_remove')
+        ],
+        [InlineKeyboardButton("❌ Закрыть", callback_data='self_employed_close')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -847,8 +859,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Команда "журнал"
-    if text_lower.startswith('журнал') or text_lower == 'журнал':
+    if text_lower.startswith('журнал') or text_lower == 'журнал' or text_lower == '📜 журнал':
         await handle_journal_command(update, context, state, text)
+        return
+    
+    # Команда "самозанятые"
+    if text_lower in ['самозанятые', '👔 самозанятые']:
+        await handle_self_employed_command(update, context, state)
+        return
+    
+    # Обработка режима добавления самозанятого
+    if state.mode == 'awaiting_self_employed_add':
+        await handle_self_employed_add(update, state, text)
+        return
+    
+    # Обработка режима удаления самозанятого
+    if state.mode == 'awaiting_self_employed_remove':
+        await handle_self_employed_remove(update, state, text)
         return
     
     # Команда "экспорт"
@@ -1639,7 +1666,7 @@ async def export_report(update: Update, club: str, date_from: str, date_to: str)
     filename = f"otchet_{club_translit}_{date_from}_{date_to}.xlsx"
     
     ReportGenerator.generate_xlsx(
-        report_rows, totals, club, f"{date_from} .. {date_to}", filename
+        report_rows, totals, club, f"{date_from} .. {date_to}", filename, db
     )
     
     # Отправляем файл
@@ -1732,7 +1759,7 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
             # Экспорт
             filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
             ReportGenerator.generate_xlsx(
-                report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename
+                report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename, db
             )
             with open(filename, 'rb') as f:
                 await update.message.reply_document(
@@ -2082,7 +2109,7 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     filename = f"otchet_{club_translit}_{data['date_from']}_{data['date_to']}.xlsx"
     
     ReportGenerator.generate_xlsx(report_rows, totals, data['club'], 
-                                  f"{data['date_from']} .. {data['date_to']}", filename)
+                                  f"{data['date_from']} .. {data['date_to']}", filename, db)
     
     with open(filename, 'rb') as f:
         await update.message.reply_document(
@@ -2175,7 +2202,7 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
     filename = f"otchet_{club_translit}_{date_from}_{date_to}.xlsx"
     
     ReportGenerator.generate_xlsx(
-        report_rows, totals, club, f"{date_from} .. {date_to}", filename
+        report_rows, totals, club, f"{date_from} .. {date_to}", filename, db
     )
     
     # Отправляем файл
@@ -2458,6 +2485,17 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif query.data == 'delete_mass_confirm_no':
         await query.edit_message_reply_markup(None)
         await handle_delete_mass_confirm_message(query.message, state, False)
+    
+    # Управление самозанятыми
+    elif query.data == 'self_employed_add':
+        await query.edit_message_text("➕ Введите код для добавления в самозанятые:\n\nПример: Д7")
+        state.mode = 'awaiting_self_employed_add'
+    elif query.data == 'self_employed_remove':
+        await query.edit_message_text("➖ Введите код для удаления из самозанятых:\n\nПример: Д7")
+        state.mode = 'awaiting_self_employed_remove'
+    elif query.data == 'self_employed_close':
+        await query.edit_message_text("✅ Закрыто")
+        state.mode = None
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
@@ -2488,6 +2526,75 @@ def format_report_summary(totals: Dict, club_name: str, period: str,
     lines.append("\n📄 Детальный отчёт в Excel файле ⬇️")
     
     return '\n'.join(lines)
+
+
+async def handle_self_employed_command(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       state: UserState):
+    """Команда управления самозанятыми"""
+    codes = db.get_all_self_employed()
+    
+    if not codes:
+        message = "📋 Список самозанятых пуст."
+    else:
+        message = f"👔 САМОЗАНЯТЫЕ ({len(codes)} чел.):\n\n"
+        message += ", ".join(codes)
+    
+    await update.message.reply_text(
+        message,
+        reply_markup=get_self_employed_action_keyboard()
+    )
+
+
+async def handle_self_employed_add(update: Update, state: UserState, code: str):
+    """Добавление кода в самозанятые"""
+    from parser import DataParser
+    
+    code = code.strip()
+    
+    # Проверка формата кода
+    if not DataParser.is_code(code):
+        await update.message.reply_text(
+            "❌ Неверный формат кода.\n"
+            "Примеры: Д7, Р1, Б52, К21"
+        )
+        return
+    
+    # Нормализуем код
+    normalized_code = DataParser.normalize_code(code)
+    
+    # Добавляем в БД
+    success, message = db.add_self_employed(normalized_code)
+    
+    await update.message.reply_text(message)
+    
+    # Сбрасываем режим
+    state.mode = None
+
+
+async def handle_self_employed_remove(update: Update, state: UserState, code: str):
+    """Удаление кода из самозанятых"""
+    from parser import DataParser
+    
+    code = code.strip()
+    
+    # Проверка формата кода
+    if not DataParser.is_code(code):
+        await update.message.reply_text(
+            "❌ Неверный формат кода.\n"
+            "Примеры: Д7, Р1, Б52, К21"
+        )
+        return
+    
+    # Нормализуем код
+    normalized_code = DataParser.normalize_code(code)
+    
+    # Удаляем из БД
+    success, message = db.remove_self_employed(normalized_code)
+    
+    await update.message.reply_text(message)
+    
+    # Сбрасываем режим
+    state.mode = None
 
 
 async def handle_journal_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
@@ -2959,6 +3066,15 @@ def main():
         print("Установите переменную окружения TELEGRAM_BOT_TOKEN")
         print("или измените значение в config.py")
         return
+    
+    # Инициализация списка самозанятых (только при первом запуске)
+    initial_self_employed = [
+        'Д4', 'Д5', 'Д11', 'Д15', 'Д18', 'Д20', 'Д23', 'Д33', 'Д35', 'Д38',
+        'Д66', 'ОФ1', 'ОФ3', 'ОФ4', 'Б13', 'Б52', 'К2', 'К4', 'К21'
+    ]
+    added = db.init_self_employed_list(initial_self_employed)
+    if added > 0:
+        print(f"✅ Инициализирован список самозанятых: {added} кодов")
     
     # Создаем приложение
     app = Application.builder().token(config.BOT_TOKEN).build()

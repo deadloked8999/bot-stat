@@ -54,6 +54,14 @@ class Database:
             )
         """)
         
+        # Таблица самозанятых
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS self_employed (
+                code TEXT PRIMARY KEY,
+                marked_at TEXT NOT NULL
+            )
+        """)
+        
         # Индексы для быстрого поиска
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_operations_club_date 
@@ -407,4 +415,120 @@ class Database:
             }
             for row in rows
         ]
+    
+    # ==================== Методы для самозанятых ====================
+    
+    def add_self_employed(self, code: str) -> Tuple[bool, str]:
+        """
+        Добавить код в список самозанятых
+        Returns: (success, message)
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            # Нормализуем код (приводим к верхнему регистру)
+            code = code.upper().strip()
+            
+            # Проверяем, не добавлен ли уже
+            cursor.execute("SELECT code FROM self_employed WHERE code = ?", (code,))
+            if cursor.fetchone():
+                conn.close()
+                return False, f"Код {code} уже в списке самозанятых"
+            
+            # Добавляем
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute(
+                "INSERT INTO self_employed (code, marked_at) VALUES (?, ?)",
+                (code, now)
+            )
+            conn.commit()
+            conn.close()
+            
+            return True, f"✅ Код {code} добавлен в самозанятые"
+        
+        except Exception as e:
+            return False, f"Ошибка: {str(e)}"
+    
+    def remove_self_employed(self, code: str) -> Tuple[bool, str]:
+        """
+        Удалить код из списка самозанятых
+        Returns: (success, message)
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            code = code.upper().strip()
+            
+            # Проверяем наличие
+            cursor.execute("SELECT code FROM self_employed WHERE code = ?", (code,))
+            if not cursor.fetchone():
+                conn.close()
+                return False, f"Код {code} не найден в списке самозанятых"
+            
+            # Удаляем
+            cursor.execute("DELETE FROM self_employed WHERE code = ?", (code,))
+            conn.commit()
+            conn.close()
+            
+            return True, f"✅ Код {code} убран из самозанятых"
+        
+        except Exception as e:
+            return False, f"Ошибка: {str(e)}"
+    
+    def is_self_employed(self, code: str) -> bool:
+        """
+        Проверить, является ли код самозанятым
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        code = code.upper().strip()
+        cursor.execute("SELECT code FROM self_employed WHERE code = ?", (code,))
+        result = cursor.fetchone() is not None
+        
+        conn.close()
+        return result
+    
+    def get_all_self_employed(self) -> List[str]:
+        """
+        Получить список всех самозанятых кодов
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT code FROM self_employed ORDER BY code")
+        codes = [row[0] for row in cursor.fetchall()]
+        
+        conn.close()
+        return codes
+    
+    def init_self_employed_list(self, codes: List[str]) -> int:
+        """
+        Инициализация списка самозанятых (для первого запуска)
+        Возвращает количество добавленных кодов
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        added = 0
+        
+        for code in codes:
+            code = code.upper().strip()
+            try:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO self_employed (code, marked_at) VALUES (?, ?)",
+                    (code, now)
+                )
+                if cursor.rowcount > 0:
+                    added += 1
+            except:
+                continue
+        
+        conn.commit()
+        conn.close()
+        
+        return added
 

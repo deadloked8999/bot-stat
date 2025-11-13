@@ -196,9 +196,10 @@ class ReportGenerator:
     
     @staticmethod
     def generate_xlsx(report_rows: List[Dict], totals: Dict, 
-                     club: str, period: str, filename: str) -> str:
+                     club: str, period: str, filename: str, db=None) -> str:
         """
         Генерация XLSX файла
+        db: экземпляр Database для проверки статуса самозанятости
         """
         wb = Workbook()
         ws = wb.active
@@ -210,8 +211,11 @@ class ReportGenerator:
         ws['A2'] = f"Период: {period}"
         ws['A2'].font = Font(size=11)
         
-        # Шапка таблицы
-        headers = ['Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 'Итог (нал + безнал − 10%)']
+        # Шапка таблицы (добавлены два столбца)
+        headers = [
+            'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 
+            'Итог (нал + безнал − 10%)', 'Самозанятость', 'К выплате (самозанятый)'
+        ]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=4, column=col, value=header)
             cell.font = Font(bold=True)
@@ -226,6 +230,22 @@ class ReportGenerator:
             ws.cell(row=row_num, column=4, value=row_data['beznal'])
             ws.cell(row=row_num, column=5, value=row_data['minus10'])
             ws.cell(row=row_num, column=6, value=row_data['itog'])
+            
+            # Проверяем статус самозанятости
+            if db:
+                is_self_employed = db.is_self_employed(row_data['code'])
+                if is_self_employed:
+                    ws.cell(row=row_num, column=7, value='✓')
+                    # К выплате = ИТОГО × 0.94
+                    payout = round(row_data['itog'] * 0.94, 2)
+                    ws.cell(row=row_num, column=8, value=payout)
+                else:
+                    ws.cell(row=row_num, column=7, value='')
+                    ws.cell(row=row_num, column=8, value='')
+            else:
+                ws.cell(row=row_num, column=7, value='')
+                ws.cell(row=row_num, column=8, value='')
+            
             row_num += 1
         
         # Итоги
@@ -242,6 +262,8 @@ class ReportGenerator:
         ws.column_dimensions['D'].width = 12
         ws.column_dimensions['E'].width = 15
         ws.column_dimensions['F'].width = 25
+        ws.column_dimensions['G'].width = 15
+        ws.column_dimensions['H'].width = 25
         
         # Сохраняем
         wb.save(filename)
