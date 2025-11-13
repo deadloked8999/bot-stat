@@ -233,11 +233,13 @@ class ReportGenerator:
             
             # Проверяем статус самозанятости
             if db:
-                is_self_employed = db.is_self_employed(row_data['code'])
+                # Нормализуем код для корректной проверки
+                normalized_code = row_data['code'].upper().strip()
+                is_self_employed = db.is_self_employed(normalized_code)
                 if is_self_employed:
                     ws.cell(row=row_num, column=7, value='✓')
-                    # К выплате = ИТОГО × 0.94
-                    payout = round(row_data['itog'] * 0.94, 2)
+                    # К выплате = ИТОГО / 0.94 (чтобы покрыть 6% налог самозанятого)
+                    payout = round(row_data['itog'] / 0.94, 2)
                     ws.cell(row=row_num, column=8, value=payout)
                 else:
                     ws.cell(row=row_num, column=7, value='')
