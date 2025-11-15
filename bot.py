@@ -598,10 +598,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Обработка подтверждения загрузки файла
     if state.mode == 'awaiting_upload_confirm':
-        if text_lower == 'записать':
-            await save_file_data(update, state)
-            return
-        elif text_lower == 'отмена' or text_lower == '❌ отмена':
+        if text_lower == 'отмена' or text_lower == '❌ отмена':
             state.upload_file_club = None
             state.upload_file_date = None
             state.upload_file_data = None
@@ -612,10 +609,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_main_keyboard()
             )
             return
+        elif text_lower.startswith('записать'):
+            # Парсим команду
+            # Варианты: "записать", "записать 1 2", "записать без 3"
+            selected_merges = None  # None = все, [] = без объединений, [1,2] = только указанные
+            
+            if text_lower == 'записать':
+                # Применить все объединения
+                selected_merges = None
+            elif 'без' in text_lower:
+                # ЗАПИСАТЬ БЕЗ 1 2 3 - исключить указанные
+                parts = text_lower.replace('записать', '').replace('без', '').strip().split()
+                excluded = []
+                for part in parts:
+                    try:
+                        excluded.append(int(part))
+                    except ValueError:
+                        pass
+                
+                if excluded:
+                    # Получаем все ID объединений
+                    data = state.upload_file_data
+                    beznal_analysis = data.get('beznal_analysis', {})
+                    nal_analysis = data.get('nal_analysis', {})
+                    
+                    all_merge_ids = []
+                    for merge in beznal_analysis.get('merges', []):
+                        if 'merge_id' in merge:
+                            all_merge_ids.append(merge['merge_id'])
+                    for merge in nal_analysis.get('merges', []):
+                        if 'merge_id' in merge:
+                            all_merge_ids.append(merge['merge_id'])
+                    
+                    # Все кроме исключенных
+                    selected_merges = [mid for mid in all_merge_ids if mid not in excluded]
+                else:
+                    selected_merges = None  # Нет исключений - все
+            else:
+                # ЗАПИСАТЬ 1 2 3 - только указанные
+                parts = text_lower.replace('записать', '').strip().split()
+                selected = []
+                for part in parts:
+                    try:
+                        selected.append(int(part))
+                    except ValueError:
+                        pass
+                
+                if selected:
+                    selected_merges = selected
+                else:
+                    selected_merges = None  # Не смогли распарсить - применяем все
+            
+            # Сохраняем выбор и сохраняем данные
+            state.upload_file_data['selected_merges'] = selected_merges
+            await save_file_data(update, state)
+            return
         else:
             await update.message.reply_text(
-                "⚠️ Введите:\n"
-                "  • ЗАПИСАТЬ - сохранить данные\n"
+                "⚠️ Неверная команда. Введите:\n"
+                "  • ЗАПИСАТЬ - применить все\n"
+                "  • ЗАПИСАТЬ 1 2 - только [1] и [2]\n"
+                "  • ЗАПИСАТЬ БЕЗ 3 - все кроме [3]\n"
                 "  • ОТМЕНА - отменить"
             )
             return
@@ -3244,16 +3298,17 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Проверяем доплаты (строки начинающиеся с %)
-        # Объединяем безнал и нал для поиска
-        all_data = parsed_beznal + parsed_nal
-        additional_analysis = DataParser.find_additional_payments(all_data)
+        # ВАЖНО: Анализируем НАЛ и БЕЗНАЛ ОТДЕЛЬНО!
+        beznal_analysis = DataParser.find_additional_payments(parsed_beznal)
+        nal_analysis = DataParser.find_additional_payments(parsed_nal)
         
         # Сохраняем данные в состояние
         state.upload_file_data = {
             'beznal': parsed_beznal,
             'nal': parsed_nal,
             'errors': errors,
-            'additional_analysis': additional_analysis
+            'beznal_analysis': beznal_analysis,
+            'nal_analysis': nal_analysis
         }
         
         # Показываем предпросмотр
@@ -3274,7 +3329,8 @@ async def show_file_preview(update: Update, state: UserState):
     beznal_list = data.get('beznal', [])
     nal_list = data.get('nal', [])
     errors = data.get('errors', [])
-    additional_analysis = data.get('additional_analysis', {})
+    beznal_analysis = data.get('beznal_analysis', {})
+    nal_analysis = data.get('nal_analysis', {})
     
     # Заголовок
     header = []
@@ -3316,40 +3372,79 @@ async def show_file_preview(update: Update, state: UserState):
             errors_text.append(f"  ... и ещё {len(errors) - 5} ошибок")
         errors_text.append("")
     
-    # Доплаты (строки с %)
+    # Доплаты (строки с %) - ОТДЕЛЬНО ДЛЯ БЕЗНАЛ И НАЛ
     additional_text = []
-    if additional_analysis:
-        merges = additional_analysis.get('merges', [])
-        not_found = additional_analysis.get('not_found', [])
-        no_code = additional_analysis.get('no_code', [])
+    merge_counter = 0  # Сквозная нумерация для всех объединений
+    
+    # БЕЗНАЛ
+    if beznal_analysis:
+        beznal_merges = beznal_analysis.get('merges', [])
+        beznal_not_found = beznal_analysis.get('not_found', [])
+        beznal_no_code = beznal_analysis.get('no_code', [])
         
-        if merges:
-            additional_text.append("🔀 ОБНАРУЖЕНЫ ДОПЛАТЫ ДЛЯ ОБЪЕДИНЕНИЯ:")
+        if beznal_merges:
+            additional_text.append("🔀 ДОПЛАТЫ БЕЗНАЛ:")
             additional_text.append("")
-            for idx, merge in enumerate(merges, 1):
+            for merge in beznal_merges:
+                merge_counter += 1
+                merge['merge_id'] = merge_counter  # Присваиваем ID
                 code = merge['code']
                 main_items = merge['main_items']
                 add_item = merge['additional_item']
                 total = merge['total_amount']
                 
-                additional_text.append(f"{idx}. Код: {code}")
+                additional_text.append(f"[{merge_counter}] Код: {code}")
                 for main in main_items:
-                    additional_text.append(f"   Основная: {main['name']} — {main['amount']:.0f}")
-                additional_text.append(f"   Доплата: {add_item['original_line']} — {add_item['amount']:.0f}")
-                additional_text.append(f"   ИТОГО: {total:.0f}")
+                    additional_text.append(f"     Основная: {main['name']} — {main['amount']:.0f}")
+                additional_text.append(f"     Доплата: {add_item['original_line']} — {add_item['amount']:.0f}")
+                additional_text.append(f"     ИТОГО: {total:.0f}")
                 additional_text.append("")
+        
+        if beznal_not_found:
+            additional_text.append("⚠️ БЕЗНАЛ - Доплаты без основной записи:")
+            for item in beznal_not_found:
+                additional_text.append(f"  • {item['original_line']} (код {item['code']} не найден)")
+            additional_text.append("")
             
-        if not_found:
-            additional_text.append("⚠️ ДОПЛАТЫ БЕЗ ОСНОВНОЙ ЗАПИСИ:")
+        if beznal_no_code:
+            additional_text.append("❓ БЕЗНАЛ - Доплаты без кода:")
+            for item in beznal_no_code:
+                additional_text.append(f"  • {item['original_line']}")
             additional_text.append("")
-            for item in not_found:
-                additional_text.append(f"  • {item['original_line']} (код {item['code']} не найден выше)")
+    
+    # НАЛ
+    if nal_analysis:
+        nal_merges = nal_analysis.get('merges', [])
+        nal_not_found = nal_analysis.get('not_found', [])
+        nal_no_code = nal_analysis.get('no_code', [])
+        
+        if nal_merges:
+            additional_text.append("🔀 ДОПЛАТЫ НАЛ:")
+            additional_text.append("")
+            for merge in nal_merges:
+                merge_counter += 1
+                merge['merge_id'] = merge_counter  # Присваиваем ID
+                code = merge['code']
+                main_items = merge['main_items']
+                add_item = merge['additional_item']
+                total = merge['total_amount']
+                
+                additional_text.append(f"[{merge_counter}] Код: {code}")
+                for main in main_items:
+                    additional_text.append(f"     Основная: {main['name']} — {main['amount']:.0f}")
+                additional_text.append(f"     Доплата: {add_item['original_line']} — {add_item['amount']:.0f}")
+                additional_text.append(f"     ИТОГО: {total:.0f}")
+                additional_text.append("")
+        
+        if nal_not_found:
+            additional_text.append("⚠️ НАЛ - Доплаты без основной записи:")
+            for item in nal_not_found:
+                additional_text.append(f"  • {item['original_line']} (код {item['code']} не найден)")
             additional_text.append("")
             
-        if no_code:
-            additional_text.append("❓ ДОПЛАТЫ БЕЗ КОДА (ТОЛЬКО ИМЯ):")
-            additional_text.append("")
-            for item in no_code:
+        if nal_no_code:
+            additional_text.append("❓ НАЛ - Доплаты без кода:")
+            for item in nal_no_code:
                 additional_text.append(f"  • {item['original_line']}")
             additional_text.append("")
     
@@ -3359,9 +3454,15 @@ async def show_file_preview(update: Update, state: UserState):
         footer.append("⚠️ ВНИМАНИЕ! Обнаружены доплаты.")
         footer.append("Проверьте объединения выше.")
         footer.append("")
-    footer.append("✅ Всё верно? Введите:")
-    footer.append("  • ЗАПИСАТЬ - сохранить в базу (с объединениями)")
-    footer.append("  • ОТМЕНА - отменить")
+        footer.append("✅ Введите команду:")
+        footer.append("  • ЗАПИСАТЬ - применить ВСЕ объединения")
+        footer.append("  • ЗАПИСАТЬ 1 2 - применить только [1] и [2]")
+        footer.append("  • ЗАПИСАТЬ БЕЗ 3 - применить все кроме [3]")
+        footer.append("  • ОТМЕНА - отменить загрузку")
+    else:
+        footer.append("✅ Всё верно? Введите:")
+        footer.append("  • ЗАПИСАТЬ - сохранить в базу")
+        footer.append("  • ОТМЕНА - отменить")
     
     # Объединяем весь текст
     full_text = '\n'.join(header + beznal_text + nal_text + errors_text + additional_text + footer)
@@ -3398,28 +3499,53 @@ async def save_file_data(update: Update, state: UserState):
     data = state.upload_file_data
     beznal_list = data.get('beznal', [])
     nal_list = data.get('nal', [])
-    additional_analysis = data.get('additional_analysis', {})
+    beznal_analysis = data.get('beznal_analysis', {})
+    nal_analysis = data.get('nal_analysis', {})
+    selected_merges = data.get('selected_merges')  # None = все, [1,2] = только указанные
     
     # Сохраняем значения до очистки
     club = state.upload_file_club
     date = state.upload_file_date
     
-    # Применяем объединения доплат
-    merges = additional_analysis.get('merges', [])
-    merged_codes = set()
+    # Создаем словари для объединений ОТДЕЛЬНО ДЛЯ БЕЗНАЛ И НАЛ
+    beznal_merge_dict = {}
+    nal_merge_dict = {}
     
-    # Создаем словарь кодов которые нужно объединить
-    merge_dict = {}
-    for merge in merges:
-        code = merge['code']
-        total_amount = merge['total_amount']
-        # Берем имя из первой основной записи
-        main_name = merge['main_items'][0]['name'] if merge['main_items'] else ''
-        merge_dict[code] = {
-            'amount': total_amount,
-            'name': main_name
-        }
-        merged_codes.add(code)
+    # БЕЗНАЛ - собираем объединения которые нужно применить
+    beznal_merges = beznal_analysis.get('merges', [])
+    for merge in beznal_merges:
+        merge_id = merge.get('merge_id')
+        # Проверяем, нужно ли применять это объединение
+        should_apply = False
+        if selected_merges is None:
+            should_apply = True  # Применяем все
+        elif merge_id in selected_merges:
+            should_apply = True  # Применяем только выбранные
+        
+        if should_apply:
+            code = merge['code']
+            beznal_merge_dict[code] = {
+                'amount': merge['total_amount'],
+                'name': merge['main_items'][0]['name'] if merge['main_items'] else ''
+            }
+    
+    # НАЛ - собираем объединения которые нужно применить
+    nal_merges = nal_analysis.get('merges', [])
+    for merge in nal_merges:
+        merge_id = merge.get('merge_id')
+        # Проверяем, нужно ли применять это объединение
+        should_apply = False
+        if selected_merges is None:
+            should_apply = True  # Применяем все
+        elif merge_id in selected_merges:
+            should_apply = True  # Применяем только выбранные
+        
+        if should_apply:
+            code = merge['code']
+            nal_merge_dict[code] = {
+                'amount': merge['total_amount'],
+                'name': merge['main_items'][0]['name'] if merge['main_items'] else ''
+            }
     
     saved_count = 0
     
@@ -3431,9 +3557,9 @@ async def save_file_data(update: Update, state: UserState):
             
         code = item['code']
         # Если код объединяется - используем итоговую сумму
-        if code in merge_dict:
-            amount = merge_dict[code]['amount']
-            name = merge_dict[code]['name']
+        if code in beznal_merge_dict:
+            amount = beznal_merge_dict[code]['amount']
+            name = beznal_merge_dict[code]['name']
         else:
             amount = item['amount']
             name = item['name']
@@ -3458,9 +3584,9 @@ async def save_file_data(update: Update, state: UserState):
             
         code = item['code']
         # Если код объединяется - используем итоговую сумму
-        if code in merge_dict:
-            amount = merge_dict[code]['amount']
-            name = merge_dict[code]['name']
+        if code in nal_merge_dict:
+            amount = nal_merge_dict[code]['amount']
+            name = nal_merge_dict[code]['name']
         else:
             amount = item['amount']
             name = item['name']
