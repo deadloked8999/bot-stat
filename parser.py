@@ -99,7 +99,12 @@ class DataParser:
             parts_by_percent = line.split('%')
             if len(parts_by_percent) == 2:
                 left_part = parts_by_percent[0].strip()  # "Р8 Дамир-11.000"
-                right_part = parts_by_percent[1].strip()  # "750"
+                right_part = parts_by_percent[1].strip()  # "750" или "-750"
+                
+                # Убираем лишний минус в начале (если есть)
+                # %-750 → 750
+                if right_part.startswith('-'):
+                    right_part = right_part[1:].strip()
                 
                 # Парсим вторую сумму (после %)
                 success2, amount2, error2 = DataParser.parse_amount(right_part)
