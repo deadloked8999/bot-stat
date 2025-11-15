@@ -3269,48 +3269,80 @@ async def show_file_preview(update: Update, state: UserState):
     nal_list = data.get('nal', [])
     errors = data.get('errors', [])
     
-    result = []
-    result.append("📎 ПРЕДПРОСМОТР ДАННЫХ ИЗ ФАЙЛА")
-    result.append("")
-    result.append(f"🏢 Клуб: {state.upload_file_club}")
-    result.append(f"📅 Дата: {state.upload_file_date}")
-    result.append("")
+    messages = []
+    current_message = []
     
+    # Заголовок
+    current_message.append("📎 ПРЕДПРОСМОТР ДАННЫХ ИЗ ФАЙЛА")
+    current_message.append("")
+    current_message.append(f"🏢 Клуб: {state.upload_file_club}")
+    current_message.append(f"📅 Дата: {state.upload_file_date}")
+    current_message.append("")
+    
+    # Функция для проверки и отправки сообщения если превышен лимит
+    def check_and_split():
+        text = '\n'.join(current_message)
+        if len(text) > 3800:  # Оставляем запас до лимита 4096
+            messages.append('\n'.join(current_message[:-1]))  # Сохраняем без последней строки
+            current_message.clear()
+            current_message.append(current_message[-1] if current_message else "")  # Добавляем последнюю строку в новое сообщение
+    
+    # БЕЗНАЛ
     if beznal_list:
-        result.append(f"📘 БЕЗНАЛ ({len(beznal_list)} записей):")
+        current_message.append(f"📘 БЕЗНАЛ ({len(beznal_list)} записей):")
         total_beznal = 0
-        for idx, item in enumerate(beznal_list[:10], 1):  # Показываем первые 10
-            result.append(f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}")
+        for idx, item in enumerate(beznal_list, 1):
+            line = f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}"
+            current_message.append(line)
             total_beznal += item['amount']
-        if len(beznal_list) > 10:
-            result.append(f"  ... и ещё {len(beznal_list) - 10} записей")
-        result.append(f"  💰 Итого безнал: {total_beznal:.0f}")
-        result.append("")
+            
+            # Проверяем размер сообщения
+            if len('\n'.join(current_message)) > 3800:
+                messages.append('\n'.join(current_message[:-1]))
+                current_message.clear()
+                current_message.append(line)
+        
+        current_message.append(f"  💰 Итого безнал: {total_beznal:.0f}")
+        current_message.append("")
     
+    # НАЛ
     if nal_list:
-        result.append(f"📗 НАЛ ({len(nal_list)} записей):")
+        current_message.append(f"📗 НАЛ ({len(nal_list)} записей):")
         total_nal = 0
-        for idx, item in enumerate(nal_list[:10], 1):  # Показываем первые 10
-            result.append(f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}")
+        for idx, item in enumerate(nal_list, 1):
+            line = f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}"
+            current_message.append(line)
             total_nal += item['amount']
-        if len(nal_list) > 10:
-            result.append(f"  ... и ещё {len(nal_list) - 10} записей")
-        result.append(f"  💰 Итого нал: {total_nal:.0f}")
-        result.append("")
+            
+            # Проверяем размер сообщения
+            if len('\n'.join(current_message)) > 3800:
+                messages.append('\n'.join(current_message[:-1]))
+                current_message.clear()
+                current_message.append(line)
+        
+        current_message.append(f"  💰 Итого нал: {total_nal:.0f}")
+        current_message.append("")
     
+    # Ошибки
     if errors:
-        result.append(f"⚠️ Ошибок при парсинге: {len(errors)}")
-        for error in errors[:3]:
-            result.append(f"  • {error}")
-        if len(errors) > 3:
-            result.append(f"  ... и ещё {len(errors) - 3} ошибок")
-        result.append("")
+        current_message.append(f"⚠️ Ошибок при парсинге: {len(errors)}")
+        for error in errors[:5]:  # Показываем первые 5 ошибок
+            current_message.append(f"  • {error}")
+        if len(errors) > 5:
+            current_message.append(f"  ... и ещё {len(errors) - 5} ошибок")
+        current_message.append("")
     
-    result.append("✅ Всё верно? Введите:")
-    result.append("  • ЗАПИСАТЬ - сохранить в базу")
-    result.append("  • ОТМЕНА - отменить")
+    # Финальное сообщение с инструкциями
+    current_message.append("✅ Всё верно? Введите:")
+    current_message.append("  • ЗАПИСАТЬ - сохранить в базу")
+    current_message.append("  • ОТМЕНА - отменить")
     
-    await update.message.reply_text('\n'.join(result))
+    # Добавляем последнее сообщение
+    messages.append('\n'.join(current_message))
+    
+    # Отправляем все сообщения
+    for msg in messages:
+        await update.message.reply_text(msg)
 
 
 async def save_file_data(update: Update, state: UserState):
@@ -3385,7 +3417,7 @@ def main():
     ]
     added = db.init_self_employed_list(initial_self_employed)
     if added > 0:
-        print(f"✅ Инициализирован список самозанятых: {added} кодов")
+        print(f"[OK] Инициализирован список самозанятых: {added} кодов")
     
     # Создаем приложение
     app = Application.builder().token(config.BOT_TOKEN).build()
@@ -3397,7 +3429,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Запускаем бота
-    print("🤖 Бот запущен!")
+    print("[BOT] Бот запущен!")
     print("Для остановки нажмите Ctrl+C")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
