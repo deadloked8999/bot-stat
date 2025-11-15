@@ -86,11 +86,72 @@ class DataParser:
         - ИМЯ = только буквы без цифр
         - Примеры: "юля д17 1000" = код:Д17 имя:юля сумма:1000
                    "д17 юля 1000" = код:Д17 имя:юля сумма:1000
+        - ФОРМАТ С %: "Р8 Дамир-11.000 % 750" = сумма1 + сумма2 = 11750
         Возвращает: (успех, данные, сообщение об ошибке)
         """
         line = line.strip()
         if not line:
             return False, {}, "Пустая строка"
+        
+        # Проверка на формат с процентом: "код имя-сумма1 % сумма2"
+        if '%' in line:
+            # Разделяем по %
+            parts_by_percent = line.split('%')
+            if len(parts_by_percent) == 2:
+                left_part = parts_by_percent[0].strip()  # "Р8 Дамир-11.000"
+                right_part = parts_by_percent[1].strip()  # "750"
+                
+                # Парсим вторую сумму (после %)
+                success2, amount2, error2 = DataParser.parse_amount(right_part)
+                if not success2:
+                    return False, {}, f"Строка {line_number}: ошибка парсинга суммы после '%': {error2}. Строка: '{line}'"
+                
+                # Обрабатываем левую часть как обычную строку
+                # Пытаемся найти сумму в левой части
+                if '-' in left_part:
+                    # Формат: "Р8 Дамир-11.000"
+                    last_dash = left_part.rfind('-')
+                    before_dash = left_part[:last_dash].strip()
+                    amount1_str = left_part[last_dash + 1:].strip()
+                    
+                    success1, amount1, error1 = DataParser.parse_amount(amount1_str)
+                    if not success1:
+                        return False, {}, f"Строка {line_number}: ошибка парсинга первой суммы: {error1}. Строка: '{line}'"
+                    
+                    # Складываем суммы
+                    total_amount = amount1 + amount2
+                    
+                    # Парсим код и имя
+                    before_parts = re.split(r'\s+', before_dash)
+                    code = None
+                    name_parts = []
+                    
+                    for part in before_parts:
+                        if DataParser.is_code(part) and code is None:
+                            code = part
+                        else:
+                            name_parts.append(part)
+                    
+                    if code is None:
+                        code = before_parts[0] if before_parts else ""
+                        name_parts = before_parts[1:] if len(before_parts) > 1 else []
+                    
+                    name = ' '.join(name_parts)
+                    
+                    # Нормализуем код
+                    normalized_code = DataParser.normalize_code(code)
+                    
+                    # Капитализируем имя
+                    if name:
+                        name = ' '.join(word.capitalize() for word in name.split())
+                    
+                    return True, {
+                        'code': normalized_code,
+                        'original_code': code,
+                        'name': name,
+                        'amount': total_amount,
+                        'original_line': line
+                    }, ""
         
         # Обработка формата с дефисом: "имя-сумма" или "код имя-сумма"
         if '-' in line:
