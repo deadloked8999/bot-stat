@@ -22,6 +22,7 @@ import config
 from database import Database
 from parser import DataParser
 from reports import ReportGenerator
+from excel_parser import ExcelProcessor
 from utils import (
     get_current_date,
     parse_date,
@@ -93,6 +94,11 @@ class UserState:
         self.preview_duplicates: Optional[list] = None
         self.edit_line_number: Optional[int] = None
         
+        # Для загрузки файла Excel
+        self.upload_file_club: Optional[str] = None
+        self.upload_file_date: Optional[str] = None
+        self.upload_file_data: Optional[dict] = None
+        
         # ID сообщений бота для удаления
         self.bot_messages: list = []
     
@@ -135,6 +141,7 @@ def get_main_keyboard():
     """Главная клавиатура с основными командами"""
     keyboard = [
         ['📥 НАЛ', '📥 БЕЗНАЛ'],
+        ['📎 ЗАГРУЗИТЬ ФАЙЛ'],
         ['✅ ГОТОВО', '❌ ОТМЕНА'],
         ['📊 ОТЧЁТ', '💰 ВЫПЛАТЫ'],
         ['📋 СПИСОК', '📤 ЭКСПОРТ'],
@@ -319,6 +326,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input',
             'awaiting_delete_mass_club', 'awaiting_delete_mass_period', 'awaiting_delete_mass_confirm',
             'awaiting_delete_employee_input',
+            'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file', 'awaiting_upload_confirm',
             'нал', 'безнал'
         ]
         
@@ -339,6 +347,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.delete_records = None
             state.merge_candidates = None
             state.merge_period = None
+            state.upload_file_club = None
+            state.upload_file_date = None
+            state.upload_file_data = None
             state.club = saved_club  # Восстанавливаем клуб
             
             await update.message.reply_text(
@@ -363,6 +374,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state.mode == 'awaiting_delete_employee_input':
         await handle_delete_employee_input(update, context, state, text)
+        return
+    
+    # Обработка ввода даты для загрузки файла
+    if state.mode == 'awaiting_upload_date':
+        success, parsed_date, error = parse_short_date(text)
+        if success:
+            state.upload_file_date = parsed_date
+            await update.message.reply_text(
+                f"📎 ЗАГРУЗКА ФАЙЛА\n"
+                f"🏢 Клуб: {state.upload_file_club}\n"
+                f"📅 Дата: {parsed_date}\n\n"
+                f"📄 Теперь отправьте Excel файл"
+            )
+            state.mode = 'awaiting_upload_file'
+        else:
+            await update.message.reply_text(
+                f"❌ {error}\n\n"
+                f"Введите дату (формат: 30,10) или напишите: отмена"
+            )
         return
     
     # НОВАЯ ЛОГИКА: обработка предпросмотра и ввода даты
@@ -464,6 +494,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '🏢 старт анора': 'старт анора',
         '📥 нал': 'нал',
         '📥 безнал': 'безнал',
+        '📎 загрузить файл': 'загрузить файл',
         '✅ готово': 'готово',
         '❌ отмена': 'отмена',
         '📊 отчёт': 'отчет',
@@ -565,6 +596,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_duplicate_confirmation(update, context, state, text, text_lower)
         return
     
+    # Обработка подтверждения загрузки файла
+    if state.mode == 'awaiting_upload_confirm':
+        if text_lower == 'записать':
+            await save_file_data(update, state)
+            return
+        elif text_lower == 'отмена' or text_lower == '❌ отмена':
+            state.upload_file_club = None
+            state.upload_file_date = None
+            state.upload_file_data = None
+            state.mode = None
+            await update.message.reply_text(
+                "❌ Загрузка файла отменена\n\n"
+                "Используйте кнопки меню:",
+                reply_markup=get_main_keyboard()
+            )
+            return
+        else:
+            await update.message.reply_text(
+                "⚠️ Введите:\n"
+                "  • ЗАПИСАТЬ - сохранить данные\n"
+                "  • ОТМЕНА - отменить"
+            )
+            return
+    
     # Команда "старт москвич" или "старт анора" (обработка как текст)
     if text_lower.startswith('старт'):
         # Если в режиме ввода данных - предупреждение
@@ -620,6 +675,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⏭️ После ввода всех данных (НАЛ и БЕЗНАЛ)\n"
                 f"   нажмите: ГОТОВО"
             )
+        return
+    
+    # Команда "загрузить файл"
+    if text_lower == 'загрузить файл':
+        if state.has_data():
+            await update.message.reply_text(
+                "⚠️ У вас есть несохранённые данные!\n"
+                "Завершите ввод командой: готово\n"
+                "Или отмените: отмена"
+            )
+            return
+        
+        await update.message.reply_text(
+            "📎 ЗАГРУЗКА EXCEL ФАЙЛА\n\n"
+            "Выберите клуб:",
+            reply_markup=get_club_keyboard()
+        )
+        state.mode = 'awaiting_upload_club'
         return
     
     # Команда "готово"
@@ -2348,32 +2421,54 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Выбор клуба при старте
     if query.data == 'club_moskvich':
-        state.club = 'Москвич'
-        state.current_date = get_current_date()
-        state.reset_input()
-        
-        await query.edit_message_text(
-            f"✅ Выбран клуб: Москвич\n"
-            f"📅 Дата: {state.current_date}"
-        )
-        await query.message.reply_text(
-            "Используйте кнопки ниже для работы:",
-            reply_markup=get_main_keyboard()
-        )
+        # Проверяем режим - загрузка файла или обычный старт
+        if state.mode == 'awaiting_upload_club':
+            state.upload_file_club = 'Москвич'
+            await query.edit_message_text(
+                f"📎 ЗАГРУЗКА ФАЙЛА\n"
+                f"🏢 Клуб: Москвич\n\n"
+                f"📅 Введите дату для этих данных:\n"
+                f"Формат: 3,11 или 30,10"
+            )
+            state.mode = 'awaiting_upload_date'
+        else:
+            state.club = 'Москвич'
+            state.current_date = get_current_date()
+            state.reset_input()
+            
+            await query.edit_message_text(
+                f"✅ Выбран клуб: Москвич\n"
+                f"📅 Дата: {state.current_date}"
+            )
+            await query.message.reply_text(
+                "Используйте кнопки ниже для работы:",
+                reply_markup=get_main_keyboard()
+            )
     
     elif query.data == 'club_anora':
-        state.club = 'Анора'
-        state.current_date = get_current_date()
-        state.reset_input()
-        
-        await query.edit_message_text(
-            f"✅ Выбран клуб: Анора\n"
-            f"📅 Дата: {state.current_date}"
-        )
-        await query.message.reply_text(
-            "Используйте кнопки ниже для работы:",
-            reply_markup=get_main_keyboard()
-        )
+        # Проверяем режим - загрузка файла или обычный старт
+        if state.mode == 'awaiting_upload_club':
+            state.upload_file_club = 'Анора'
+            await query.edit_message_text(
+                f"📎 ЗАГРУЗКА ФАЙЛА\n"
+                f"🏢 Клуб: Анора\n\n"
+                f"📅 Введите дату для этих данных:\n"
+                f"Формат: 3,11 или 30,10"
+            )
+            state.mode = 'awaiting_upload_date'
+        else:
+            state.club = 'Анора'
+            state.current_date = get_current_date()
+            state.reset_input()
+            
+            await query.edit_message_text(
+                f"✅ Выбран клуб: Анора\n"
+                f"📅 Дата: {state.current_date}"
+            )
+            await query.message.reply_text(
+                "Используйте кнопки ниже для работы:",
+                reply_markup=get_main_keyboard()
+            )
     
     # Выбор режима удаления
     elif query.data == 'delete_mode_employee':
@@ -3058,6 +3153,222 @@ async def save_preview_data(update: Update, state: UserState):
     )
 
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка загруженных документов (Excel файлы)"""
+    user_id = update.effective_user.id
+    state = get_user_state(user_id)
+    
+    # Проверка авторизации
+    if user_id not in AUTHORIZED_USERS:
+        await update.message.reply_text("🔒 Требуется авторизация")
+        return
+    
+    # Проверяем что мы в режиме ожидания файла
+    if state.mode != 'awaiting_upload_file':
+        return
+    
+    document = update.message.document
+    
+    # Проверяем что это Excel файл
+    if not (document.file_name.endswith('.xlsx') or document.file_name.endswith('.xls')):
+        await update.message.reply_text(
+            "❌ Поддерживаются только Excel файлы (.xlsx, .xls)\n"
+            "Отправьте правильный файл или напишите: отмена"
+        )
+        return
+    
+    await update.message.reply_text("⏳ Обрабатываю файл...")
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        file_bytes = await file.download_as_bytearray()
+        
+        # Парсим Excel
+        excel_processor = ExcelProcessor()
+        notes_data = excel_processor.extract_notes_entries(bytes(file_bytes))
+        
+        if not notes_data or (not notes_data.get('безнал') and not notes_data.get('нал')):
+            await update.message.reply_text(
+                "❌ Не найден блок 'Примечания' в файле\n"
+                "или он пустой.\n\n"
+                "Проверьте файл и попробуйте снова\n"
+                "или напишите: отмена"
+            )
+            return
+        
+        # Обрабатываем данные через DataParser
+        beznal_entries = notes_data.get('безнал', [])
+        nal_entries = notes_data.get('нал', [])
+        
+        parsed_beznal = []
+        parsed_nal = []
+        errors = []
+        
+        # Парсим безнал
+        for idx, entry in enumerate(beznal_entries, 1):
+            if entry.get('is_total'):
+                continue  # Пропускаем строку ИТОГО
+            
+            entry_text = entry.get('entry_text', '').strip()
+            if not entry_text:
+                continue
+            
+            success, data, error = DataParser.parse_line(entry_text, idx)
+            if success:
+                parsed_beznal.append(data)
+            elif error and 'Пустая строка' not in error:
+                errors.append(f"БЕЗНАЛ строка {idx}: {error}")
+        
+        # Парсим нал
+        for idx, entry in enumerate(nal_entries, 1):
+            if entry.get('is_total'):
+                continue  # Пропускаем строку ИТОГО
+            
+            entry_text = entry.get('entry_text', '').strip()
+            if not entry_text:
+                continue
+            
+            success, data, error = DataParser.parse_line(entry_text, idx)
+            if success:
+                parsed_nal.append(data)
+            elif error and 'Пустая строка' not in error:
+                errors.append(f"НАЛ строка {idx}: {error}")
+        
+        if not parsed_beznal and not parsed_nal:
+            await update.message.reply_text(
+                "❌ Не удалось извлечь данные из файла\n\n"
+                "Ошибки:\n" + "\n".join(errors[:5]) if errors else "Нет валидных строк"
+            )
+            state.mode = None
+            return
+        
+        # Сохраняем данные в состояние
+        state.upload_file_data = {
+            'beznal': parsed_beznal,
+            'nal': parsed_nal,
+            'errors': errors
+        }
+        
+        # Показываем предпросмотр
+        await show_file_preview(update, state)
+        state.mode = 'awaiting_upload_confirm'
+        
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка обработки файла: {str(e)}\n\n"
+            f"Попробуйте снова или напишите: отмена"
+        )
+        state.mode = None
+
+
+async def show_file_preview(update: Update, state: UserState):
+    """Показать предпросмотр данных из файла"""
+    data = state.upload_file_data
+    beznal_list = data.get('beznal', [])
+    nal_list = data.get('nal', [])
+    errors = data.get('errors', [])
+    
+    result = []
+    result.append("📎 ПРЕДПРОСМОТР ДАННЫХ ИЗ ФАЙЛА")
+    result.append("")
+    result.append(f"🏢 Клуб: {state.upload_file_club}")
+    result.append(f"📅 Дата: {state.upload_file_date}")
+    result.append("")
+    
+    if beznal_list:
+        result.append(f"📘 БЕЗНАЛ ({len(beznal_list)} записей):")
+        total_beznal = 0
+        for idx, item in enumerate(beznal_list[:10], 1):  # Показываем первые 10
+            result.append(f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}")
+            total_beznal += item['amount']
+        if len(beznal_list) > 10:
+            result.append(f"  ... и ещё {len(beznal_list) - 10} записей")
+        result.append(f"  💰 Итого безнал: {total_beznal:.0f}")
+        result.append("")
+    
+    if nal_list:
+        result.append(f"📗 НАЛ ({len(nal_list)} записей):")
+        total_nal = 0
+        for idx, item in enumerate(nal_list[:10], 1):  # Показываем первые 10
+            result.append(f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}")
+            total_nal += item['amount']
+        if len(nal_list) > 10:
+            result.append(f"  ... и ещё {len(nal_list) - 10} записей")
+        result.append(f"  💰 Итого нал: {total_nal:.0f}")
+        result.append("")
+    
+    if errors:
+        result.append(f"⚠️ Ошибок при парсинге: {len(errors)}")
+        for error in errors[:3]:
+            result.append(f"  • {error}")
+        if len(errors) > 3:
+            result.append(f"  ... и ещё {len(errors) - 3} ошибок")
+        result.append("")
+    
+    result.append("✅ Всё верно? Введите:")
+    result.append("  • ЗАПИСАТЬ - сохранить в базу")
+    result.append("  • ОТМЕНА - отменить")
+    
+    await update.message.reply_text('\n'.join(result))
+
+
+async def save_file_data(update: Update, state: UserState):
+    """Сохранение данных из файла в БД"""
+    data = state.upload_file_data
+    beznal_list = data.get('beznal', [])
+    nal_list = data.get('nal', [])
+    
+    # Сохраняем значения до очистки
+    club = state.upload_file_club
+    date = state.upload_file_date
+    
+    saved_count = 0
+    
+    # Сохраняем безнал
+    for item in beznal_list:
+        db.add_or_update_operation(
+            club=club,
+            date=date,
+            code=item['code'],
+            name=item['name'],
+            channel='безнал',
+            amount=item['amount'],
+            original_line=item['original_line'],
+            aggregate=True
+        )
+        saved_count += 1
+    
+    # Сохраняем нал
+    for item in nal_list:
+        db.add_or_update_operation(
+            club=club,
+            date=date,
+            code=item['code'],
+            name=item['name'],
+            channel='нал',
+            amount=item['amount'],
+            original_line=item['original_line'],
+            aggregate=True
+        )
+        saved_count += 1
+    
+    # Очищаем состояние
+    state.upload_file_club = None
+    state.upload_file_date = None
+    state.upload_file_data = None
+    state.mode = None
+    
+    await update.message.reply_text(
+        f"✅ ДАННЫЕ ИЗ ФАЙЛА СОХРАНЕНЫ!\n\n"
+        f"🏢 Клуб: {club}\n"
+        f"📅 Дата: {date}\n"
+        f"📊 Записей: {saved_count}\n\n"
+        f"Используйте кнопки меню ⬇️",
+        reply_markup=get_main_keyboard()
+    )
+
+
 def main():
     """Запуск бота"""
     # Проверяем токен
@@ -3082,6 +3393,7 @@ def main():
     # Регистрируем обработчики
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Запускаем бота
