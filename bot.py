@@ -3269,80 +3269,80 @@ async def show_file_preview(update: Update, state: UserState):
     nal_list = data.get('nal', [])
     errors = data.get('errors', [])
     
-    messages = []
-    current_message = []
-    
     # Заголовок
-    current_message.append("📎 ПРЕДПРОСМОТР ДАННЫХ ИЗ ФАЙЛА")
-    current_message.append("")
-    current_message.append(f"🏢 Клуб: {state.upload_file_club}")
-    current_message.append(f"📅 Дата: {state.upload_file_date}")
-    current_message.append("")
+    header = []
+    header.append("📎 ПРЕДПРОСМОТР ДАННЫХ ИЗ ФАЙЛА")
+    header.append("")
+    header.append(f"🏢 Клуб: {state.upload_file_club}")
+    header.append(f"📅 Дата: {state.upload_file_date}")
+    header.append("")
     
-    # Функция для проверки и отправки сообщения если превышен лимит
-    def check_and_split():
-        text = '\n'.join(current_message)
-        if len(text) > 3800:  # Оставляем запас до лимита 4096
-            messages.append('\n'.join(current_message[:-1]))  # Сохраняем без последней строки
-            current_message.clear()
-            current_message.append(current_message[-1] if current_message else "")  # Добавляем последнюю строку в новое сообщение
-    
-    # БЕЗНАЛ
+    # БЕЗНАЛ - формируем текст
+    beznal_text = []
     if beznal_list:
-        current_message.append(f"📘 БЕЗНАЛ ({len(beznal_list)} записей):")
+        beznal_text.append(f"📘 БЕЗНАЛ ({len(beznal_list)} записей):")
         total_beznal = 0
         for idx, item in enumerate(beznal_list, 1):
-            line = f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}"
-            current_message.append(line)
+            beznal_text.append(f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}")
             total_beznal += item['amount']
-            
-            # Проверяем размер сообщения
-            if len('\n'.join(current_message)) > 3800:
-                messages.append('\n'.join(current_message[:-1]))
-                current_message.clear()
-                current_message.append(line)
-        
-        current_message.append(f"  💰 Итого безнал: {total_beznal:.0f}")
-        current_message.append("")
+        beznal_text.append(f"  💰 Итого безнал: {total_beznal:.0f}")
+        beznal_text.append("")
     
-    # НАЛ
+    # НАЛ - формируем текст
+    nal_text = []
     if nal_list:
-        current_message.append(f"📗 НАЛ ({len(nal_list)} записей):")
+        nal_text.append(f"📗 НАЛ ({len(nal_list)} записей):")
         total_nal = 0
         for idx, item in enumerate(nal_list, 1):
-            line = f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}"
-            current_message.append(line)
+            nal_text.append(f"  {idx}. {item['code']} {item['name']} — {item['amount']:.0f}")
             total_nal += item['amount']
-            
-            # Проверяем размер сообщения
-            if len('\n'.join(current_message)) > 3800:
-                messages.append('\n'.join(current_message[:-1]))
-                current_message.clear()
-                current_message.append(line)
-        
-        current_message.append(f"  💰 Итого нал: {total_nal:.0f}")
-        current_message.append("")
+        nal_text.append(f"  💰 Итого нал: {total_nal:.0f}")
+        nal_text.append("")
     
     # Ошибки
+    errors_text = []
     if errors:
-        current_message.append(f"⚠️ Ошибок при парсинге: {len(errors)}")
-        for error in errors[:5]:  # Показываем первые 5 ошибок
-            current_message.append(f"  • {error}")
+        errors_text.append(f"⚠️ Ошибок при парсинге: {len(errors)}")
+        for error in errors[:5]:
+            errors_text.append(f"  • {error}")
         if len(errors) > 5:
-            current_message.append(f"  ... и ещё {len(errors) - 5} ошибок")
-        current_message.append("")
+            errors_text.append(f"  ... и ещё {len(errors) - 5} ошибок")
+        errors_text.append("")
     
-    # Финальное сообщение с инструкциями
-    current_message.append("✅ Всё верно? Введите:")
-    current_message.append("  • ЗАПИСАТЬ - сохранить в базу")
-    current_message.append("  • ОТМЕНА - отменить")
+    # Финал
+    footer = []
+    footer.append("✅ Всё верно? Введите:")
+    footer.append("  • ЗАПИСАТЬ - сохранить в базу")
+    footer.append("  • ОТМЕНА - отменить")
     
-    # Добавляем последнее сообщение
-    messages.append('\n'.join(current_message))
+    # Объединяем весь текст
+    full_text = '\n'.join(header + beznal_text + nal_text + errors_text + footer)
     
-    # Отправляем все сообщения
-    for msg in messages:
-        await update.message.reply_text(msg)
+    # Разбиваем на части по 4000 символов если нужно
+    max_length = 4000
+    if len(full_text) <= max_length:
+        await update.message.reply_text(full_text)
+    else:
+        # Разбиваем на куски
+        parts = []
+        current_part = []
+        
+        for line in (header + beznal_text + nal_text + errors_text + footer):
+            test_part = '\n'.join(current_part + [line])
+            if len(test_part) > max_length and current_part:
+                # Сохраняем текущую часть и начинаем новую
+                parts.append('\n'.join(current_part))
+                current_part = [line]
+            else:
+                current_part.append(line)
+        
+        # Добавляем последнюю часть
+        if current_part:
+            parts.append('\n'.join(current_part))
+        
+        # Отправляем все части
+        for part in parts:
+            await update.message.reply_text(part)
 
 
 async def save_file_data(update: Update, state: UserState):
