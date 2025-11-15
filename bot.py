@@ -3243,11 +3243,17 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.mode = None
             return
         
+        # Проверяем доплаты (строки начинающиеся с %)
+        # Объединяем безнал и нал для поиска
+        all_data = parsed_beznal + parsed_nal
+        additional_analysis = DataParser.find_additional_payments(all_data)
+        
         # Сохраняем данные в состояние
         state.upload_file_data = {
             'beznal': parsed_beznal,
             'nal': parsed_nal,
-            'errors': errors
+            'errors': errors,
+            'additional_analysis': additional_analysis
         }
         
         # Показываем предпросмотр
@@ -3268,6 +3274,7 @@ async def show_file_preview(update: Update, state: UserState):
     beznal_list = data.get('beznal', [])
     nal_list = data.get('nal', [])
     errors = data.get('errors', [])
+    additional_analysis = data.get('additional_analysis', {})
     
     # Заголовок
     header = []
@@ -3309,14 +3316,55 @@ async def show_file_preview(update: Update, state: UserState):
             errors_text.append(f"  ... и ещё {len(errors) - 5} ошибок")
         errors_text.append("")
     
+    # Доплаты (строки с %)
+    additional_text = []
+    if additional_analysis:
+        merges = additional_analysis.get('merges', [])
+        not_found = additional_analysis.get('not_found', [])
+        no_code = additional_analysis.get('no_code', [])
+        
+        if merges:
+            additional_text.append("🔀 ОБНАРУЖЕНЫ ДОПЛАТЫ ДЛЯ ОБЪЕДИНЕНИЯ:")
+            additional_text.append("")
+            for idx, merge in enumerate(merges, 1):
+                code = merge['code']
+                main_items = merge['main_items']
+                add_item = merge['additional_item']
+                total = merge['total_amount']
+                
+                additional_text.append(f"{idx}. Код: {code}")
+                for main in main_items:
+                    additional_text.append(f"   Основная: {main['name']} — {main['amount']:.0f}")
+                additional_text.append(f"   Доплата: {add_item['original_line']} — {add_item['amount']:.0f}")
+                additional_text.append(f"   ИТОГО: {total:.0f}")
+                additional_text.append("")
+            
+        if not_found:
+            additional_text.append("⚠️ ДОПЛАТЫ БЕЗ ОСНОВНОЙ ЗАПИСИ:")
+            additional_text.append("")
+            for item in not_found:
+                additional_text.append(f"  • {item['original_line']} (код {item['code']} не найден выше)")
+            additional_text.append("")
+            
+        if no_code:
+            additional_text.append("❓ ДОПЛАТЫ БЕЗ КОДА (ТОЛЬКО ИМЯ):")
+            additional_text.append("")
+            for item in no_code:
+                additional_text.append(f"  • {item['original_line']}")
+            additional_text.append("")
+    
     # Финал
     footer = []
+    if additional_text:
+        footer.append("⚠️ ВНИМАНИЕ! Обнаружены доплаты.")
+        footer.append("Проверьте объединения выше.")
+        footer.append("")
     footer.append("✅ Всё верно? Введите:")
-    footer.append("  • ЗАПИСАТЬ - сохранить в базу")
+    footer.append("  • ЗАПИСАТЬ - сохранить в базу (с объединениями)")
     footer.append("  • ОТМЕНА - отменить")
     
     # Объединяем весь текст
-    full_text = '\n'.join(header + beznal_text + nal_text + errors_text + footer)
+    full_text = '\n'.join(header + beznal_text + nal_text + errors_text + additional_text + footer)
     
     # Разбиваем на части по 4000 символов если нужно
     max_length = 4000
@@ -3327,7 +3375,7 @@ async def show_file_preview(update: Update, state: UserState):
         parts = []
         current_part = []
         
-        for line in (header + beznal_text + nal_text + errors_text + footer):
+        for line in (header + beznal_text + nal_text + errors_text + additional_text + footer):
             test_part = '\n'.join(current_part + [line])
             if len(test_part) > max_length and current_part:
                 # Сохраняем текущую часть и начинаем новую
@@ -3346,26 +3394,57 @@ async def show_file_preview(update: Update, state: UserState):
 
 
 async def save_file_data(update: Update, state: UserState):
-    """Сохранение данных из файла в БД"""
+    """Сохранение данных из файла в БД с учетом объединений доплат"""
     data = state.upload_file_data
     beznal_list = data.get('beznal', [])
     nal_list = data.get('nal', [])
+    additional_analysis = data.get('additional_analysis', {})
     
     # Сохраняем значения до очистки
     club = state.upload_file_club
     date = state.upload_file_date
     
+    # Применяем объединения доплат
+    merges = additional_analysis.get('merges', [])
+    merged_codes = set()
+    
+    # Создаем словарь кодов которые нужно объединить
+    merge_dict = {}
+    for merge in merges:
+        code = merge['code']
+        total_amount = merge['total_amount']
+        # Берем имя из первой основной записи
+        main_name = merge['main_items'][0]['name'] if merge['main_items'] else ''
+        merge_dict[code] = {
+            'amount': total_amount,
+            'name': main_name
+        }
+        merged_codes.add(code)
+    
     saved_count = 0
     
     # Сохраняем безнал
     for item in beznal_list:
+        # Пропускаем доплаты (is_additional=True) - они уже учтены
+        if item.get('is_additional', False):
+            continue
+            
+        code = item['code']
+        # Если код объединяется - используем итоговую сумму
+        if code in merge_dict:
+            amount = merge_dict[code]['amount']
+            name = merge_dict[code]['name']
+        else:
+            amount = item['amount']
+            name = item['name']
+            
         db.add_or_update_operation(
             club=club,
             date=date,
-            code=item['code'],
-            name=item['name'],
+            code=code,
+            name=name,
             channel='безнал',
-            amount=item['amount'],
+            amount=amount,
             original_line=item['original_line'],
             aggregate=True
         )
@@ -3373,13 +3452,26 @@ async def save_file_data(update: Update, state: UserState):
     
     # Сохраняем нал
     for item in nal_list:
+        # Пропускаем доплаты (is_additional=True) - они уже учтены
+        if item.get('is_additional', False):
+            continue
+            
+        code = item['code']
+        # Если код объединяется - используем итоговую сумму
+        if code in merge_dict:
+            amount = merge_dict[code]['amount']
+            name = merge_dict[code]['name']
+        else:
+            amount = item['amount']
+            name = item['name']
+            
         db.add_or_update_operation(
             club=club,
             date=date,
-            code=item['code'],
-            name=item['name'],
+            code=code,
+            name=name,
             channel='нал',
-            amount=item['amount'],
+            amount=amount,
             original_line=item['original_line'],
             aggregate=True
         )

@@ -87,11 +87,19 @@ class DataParser:
         - Примеры: "юля д17 1000" = код:Д17 имя:юля сумма:1000
                    "д17 юля 1000" = код:Д17 имя:юля сумма:1000
         - ФОРМАТ С %: "Р8 Дамир-11.000 % 750" = сумма1 + сумма2 = 11750
+        - СТРОКИ НАЧИНАЮЩИЕСЯ С %: "%Р1-2750" = доплата к коду Р1
         Возвращает: (успех, данные, сообщение об ошибке)
         """
         line = line.strip()
         if not line:
             return False, {}, "Пустая строка"
+        
+        # Проверка на строку начинающуюся с %
+        # Это доплата к существующему коду
+        is_additional_payment = False
+        if line.startswith('%'):
+            is_additional_payment = True
+            line = line[1:].strip()  # Убираем % в начале
         
         # Проверка на формат с процентом: "код имя-сумма1 % сумма2"
         if '%' in line:
@@ -238,7 +246,8 @@ class DataParser:
             'original_code': code,
             'name': name,
             'amount': amount,
-            'original_line': line
+            'original_line': line,
+            'is_additional': is_additional_payment  # Флаг доплаты (строка начиналась с %)
         }, ""
     
     @staticmethod
@@ -397,6 +406,69 @@ class DataParser:
                     })
         
         return duplicates
+    
+    @staticmethod
+    def find_additional_payments(data_list: List[Dict]) -> Dict:
+        """
+        Поиск доплат (записей начинающихся с %) и поиск основных записей для объединения
+        
+        Возвращает:
+        {
+            'merges': [список объединений с найденными основными записями],
+            'not_found': [список доплат без основной записи],
+            'no_code': [список доплат без кода (только имя)]
+        }
+        """
+        # Разделяем на обычные и доплаты
+        regular = []
+        additional = []
+        
+        for item in data_list:
+            if item.get('is_additional', False):
+                additional.append(item)
+            else:
+                regular.append(item)
+        
+        # Индексируем обычные записи по коду
+        by_code = {}
+        for item in regular:
+            code = item['code']
+            if code not in by_code:
+                by_code[code] = []
+            by_code[code].append(item)
+        
+        merges = []
+        not_found = []
+        no_code = []
+        
+        for add_item in additional:
+            code = add_item['code']
+            
+            # Проверяем есть ли код
+            if not code or not DataParser.is_code(code):
+                # Код не определен (только имя)
+                no_code.append(add_item)
+                continue
+            
+            # Ищем основную запись с таким кодом
+            if code in by_code:
+                # Нашли! Создаем объединение
+                main_items = by_code[code]
+                merges.append({
+                    'code': code,
+                    'main_items': main_items,  # Может быть несколько основных записей
+                    'additional_item': add_item,
+                    'total_amount': sum(item['amount'] for item in main_items) + add_item['amount']
+                })
+            else:
+                # Не нашли основную запись
+                not_found.append(add_item)
+        
+        return {
+            'merges': merges,
+            'not_found': not_found,
+            'no_code': no_code
+        }
     
     @staticmethod
     def format_parse_result(successful: List[Dict], errors: List[str], 
