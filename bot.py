@@ -2930,15 +2930,14 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
             # Обрабатываем оставшийся клуб через generate_and_send_report
             for club in remaining_clubs:
                 await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
-                # Если установлен режим ожидания - НЕ выходим, а продолжим после обработки
+                # Если установлен режим ожидания - выходим
+                # После обработки дубликатов, эта функция вызовется СНОВА для того же клуба
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
-                    # Прерываем цикл, но НЕ функцию - пусть обработается дубликат
-                    break
+                    return
         
-        # ВАЖНО: НЕ проверяем сразу len == 2, потому что второй клуб может быть
-        # в процессе обработки дубликатов. Проверку делаем после возврата из обработки.
-        # Если ВСЕ клубы обработаны И нет активных режимов ожидания - генерируем сводный отчет
-        if len(state.processed_clubs_for_report) == 2 and state.mode not in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
+        # Проверяем - все ли клубы обработаны?
+        # Этот блок выполнится ПОСЛЕ того как пользователь обработает дубликаты второго клуба
+        if len(state.processed_clubs_for_report) == 2:
             # Используем msg для update
             if msg and not update.message:
                 new_update = Update(
