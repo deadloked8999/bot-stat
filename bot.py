@@ -3003,6 +3003,12 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
     
     # Удаляем временный файл
     os.remove(filename)
+    
+    # Если это часть обработки "оба" клуба - отмечаем клуб как обработанный
+    if state and state.report_club == 'оба':
+        if not hasattr(state, 'processed_clubs_for_report'):
+            state.processed_clubs_for_report = set()
+        state.processed_clubs_for_report.add(club)
 
 
 async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
