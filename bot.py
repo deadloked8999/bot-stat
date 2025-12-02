@@ -1910,13 +1910,21 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     sb_anora = [op for op in ops_anora if op['code'] == 'СБ' and op.get('name')]
     
     if sb_moskvich and sb_anora:
-        # Группируем по именам
+        # Группируем по именам С ПРИМЕНЕНИЕМ ОБЪЕДИНЕНИЙ ВНУТРИ КЛУБА
         from collections import defaultdict
         sb_names_m = defaultdict(lambda: {'nal': 0, 'beznal': 0})
         sb_names_a = defaultdict(lambda: {'nal': 0, 'beznal': 0})
         
+        # Получаем словари объединений СБ из state (если есть)
+        sb_merges_m = getattr(state, 'sb_merges_moskvich', {}) or {}
+        sb_merges_a = getattr(state, 'sb_merges_anora', {}) or {}
+        
         for op in sb_moskvich:
             name = op['name'].strip()
+            # Применяем объединение Москвича
+            if name in sb_merges_m:
+                name = sb_merges_m[name]
+            
             if op['channel'] == 'нал':
                 sb_names_m[name]['nal'] += op['amount']
             else:
@@ -1924,6 +1932,10 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
         
         for op in sb_anora:
             name = op['name'].strip()
+            # Применяем объединение Аноры
+            if name in sb_merges_a:
+                name = sb_merges_a[name]
+            
             if op['channel'] == 'нал':
                 sb_names_a[name]['nal'] += op['amount']
             else:
@@ -2233,7 +2245,6 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
     
     # 1.5. Добавляем ОБЪЕДИНЁННЫЕ СБ между клубами
     sb_matches = getattr(state, 'sb_cross_club_matches', [])
-    await msg.reply_text(f"🔍 DEBUG: sb_cross_club_matches содержит {len(sb_matches)} пар СБ")
     for i, match in enumerate(sb_matches):
         sb_idx = len(state.merge_candidates) + i  # Индекс в общем списке
         name_m = match['name_moskvich']
@@ -2348,11 +2359,6 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
         if op['code'] != 'СБ' and make_processed_key(op['code'], op['name']) not in processed:
             merged_ops.append(op)
     
-    # ОТЛАДКА: Проверяем сколько СБ в merged_ops
-    sb_count_in_merged = len([op for op in merged_ops if op['code'] == 'СБ'])
-    unique_sb_names = set([op['name'] for op in merged_ops if op['code'] == 'СБ'])
-    await msg.reply_text(f"🔍 DEBUG: В merged_ops СБ операций: {sb_count_in_merged}, уникальных имён: {len(unique_sb_names)}")
-    
     # Генерируем СВОДНЫЙ отчет
     # ДЛЯ СВОДНОГО НЕ передаём sb_name_merges, т.к. уже применили выше!
     if merged_ops:
@@ -2361,10 +2367,6 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
                 merged_ops,
                 sb_name_merges=None  # УЖЕ применили объединения!
             )
-            
-            # ОТЛАДКА: Проверяем сколько СБ в report_rows
-            sb_count_in_report = len([row for row in report_rows if row['code'] == 'СБ'])
-            await msg.reply_text(f"🔍 DEBUG: В report_rows СБ строк: {sb_count_in_report}")
             
             # Краткая сводка вместо полного отчёта
             merged_regular = len(state.merge_candidates) - len(excluded_regular) if state.merge_candidates else 0

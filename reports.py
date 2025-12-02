@@ -63,11 +63,6 @@ class ReportGenerator:
         total_minus10 = 0.0
         total_itog = 0.0
         
-        # ОТЛАДКА: Сколько групп СБ
-        sb_groups = [k for k in employee_data.keys() if k == 'СБ' or k.startswith('СБ_')]
-        print(f"DEBUG calculate_report: СБ групп в employee_data: {len(sb_groups)}")
-        print(f"DEBUG calculate_report: Группы: {sb_groups}")
-        
         for group_key in sorted(employee_data.keys()):
             data = employee_data[group_key]
             
