@@ -336,19 +336,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
         return
     
-    # Команда "старт москвич" или "старт анора" - обрабатываем ПЕРВОЙ (до всех режимов!)
-    if text_lower.startswith('старт'):
-        # Если в режиме ввода данных - предупреждение
-        if state.has_data() and state.mode not in ['awaiting_date', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm', 'awaiting_merge_confirm']:
-            await update.message.reply_text(
-                "⚠️ У вас есть несохранённые данные!\n"
-                "Завершите ввод командой: готово\n"
-                "Или отмените: отмена"
-            )
-            return
-        await start_command(update, context)
-        return
-    
     # УНИВЕРСАЛЬНАЯ КНОПКА ОТМЕНА - работает на ЛЮБОМ этапе!
     # Проверяем ПЕРЕД всеми режимами
     if text_lower == 'отмена' or text_lower == '❌ отмена':
@@ -548,6 +535,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если нажата кнопка - преобразуем в команду
     if text_lower in button_commands:
         text_lower = button_commands[text_lower]
+    
+    # Команда "старт москвич" или "старт анора" - обрабатываем ПЕРВОЙ (после преобразования кнопок!)
+    if text_lower.startswith('старт'):
+        # Если в режиме ввода данных - предупреждение
+        if state.has_data() and state.mode not in ['awaiting_date', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm', 'awaiting_merge_confirm']:
+            await update.message.reply_text(
+                "⚠️ У вас есть несохранённые данные!\n"
+                "Завершите ввод командой: готово\n"
+                "Или отмените: отмена"
+            )
+            return
+        await start_command(update, context)
+        return
     
     # Команда "кнопки" - показать клавиатуру
     if text_lower == 'кнопки':
