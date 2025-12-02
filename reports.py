@@ -19,7 +19,8 @@ class ReportGenerator:
         sb_name_merges: словарь для объединения имен СБ {старое_имя: новое_имя}
         Возвращает: (строки_отчета, итоги_по_строкам, итоги_пересчет, проверка_ок)
         """
-        # Группируем по сотрудникам (код)
+        # Группируем по сотрудникам
+        # Для СБ группируем по (код, имя), для остальных по коду
         employee_data = defaultdict(lambda: {
             'names': set(),
             'nal': 0.0,
@@ -40,13 +41,19 @@ class ReportGenerator:
             if sb_name_merges and code == 'СБ' and name in sb_name_merges:
                 name = sb_name_merges[name]
             
-            employee_data[code]['names'].add(name)
+            # ДЛЯ СБ группируем по комбинации (код + имя), чтобы разные СБ не объединялись
+            if code == 'СБ':
+                group_key = f"СБ_{name}" if name else "СБ"
+            else:
+                group_key = code
+            
+            employee_data[group_key]['names'].add(name)
             
             if channel == 'нал':
-                employee_data[code]['nal'] += amount
+                employee_data[group_key]['nal'] += amount
                 total_nal_raw += amount
             elif channel == 'безнал':
-                employee_data[code]['beznal'] += amount
+                employee_data[group_key]['beznal'] += amount
                 total_beznal_raw += amount
         
         # Формируем строки отчета
@@ -56,8 +63,14 @@ class ReportGenerator:
         total_minus10 = 0.0
         total_itog = 0.0
         
-        for code in sorted(employee_data.keys()):
-            data = employee_data[code]
+        for group_key in sorted(employee_data.keys()):
+            data = employee_data[group_key]
+            
+            # Определяем реальный код (убираем префикс "СБ_" если есть)
+            if group_key.startswith('СБ_'):
+                code = 'СБ'
+            else:
+                code = group_key
             
             # Имя (если разные - берем первое и помечаем)
             names_list = list(data['names'])
