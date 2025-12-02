@@ -2324,6 +2324,10 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
         elif make_processed_key(code, name) not in processed:
             merged_ops.append(op)
     
+    # ОТЛАДКА: Проверяем сколько СБ в merged_ops
+    sb_count_in_merged = len([op for op in merged_ops if op['code'] == 'СБ'])
+    await msg.reply_text(f"🔍 DEBUG: В merged_ops СБ операций: {sb_count_in_merged}")
+    
     # Генерируем СВОДНЫЙ отчет
     if merged_ops:
         try:
@@ -2331,6 +2335,10 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
                 merged_ops,
                 sb_name_merges=combined_sb_merges if combined_sb_merges else None
             )
+            
+            # ОТЛАДКА: Проверяем сколько СБ в report_rows
+            sb_count_in_report = len([row for row in report_rows if row['code'] == 'СБ'])
+            await msg.reply_text(f"🔍 DEBUG: В report_rows СБ строк: {sb_count_in_report}")
             
             # Краткая сводка вместо полного отчёта
             merged_regular = len(state.merge_candidates) - len(excluded_regular) if state.merge_candidates else 0
