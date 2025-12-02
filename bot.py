@@ -3049,7 +3049,7 @@ async def prepare_sb_merge_internal(msg, state: UserState, club: str, date_from:
 
 
 async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str, 
-                                  state: UserState = None, check_duplicates: bool = True, message=None):
+                                  state: UserState = None, check_duplicates: bool = True, message=None, sb_name_merges: dict = None):
     """Генерация и отправка отчета"""
     # Определяем куда отправлять сообщения
     msg = message if message else update.message
@@ -3120,7 +3120,10 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
             return
     
     # Генерируем отчет (без дубликатов или после подтверждения)
-    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(operations)
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+        operations,
+        sb_name_merges=sb_name_merges if sb_name_merges else None
+    )
     
     # Краткая сводка вместо полного отчёта
     summary = format_report_summary(
