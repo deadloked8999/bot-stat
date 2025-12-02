@@ -2789,6 +2789,9 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     # Используем message если передан, иначе update.message
     msg = message if message else update.message
     
+    # ОТЛАДКА
+    await msg.reply_text(f"🔍 DEBUG [START]: report_club={state.report_club}, processed={getattr(state, 'processed_clubs_for_report', 'НЕТ')}")
+    
     if not state.sb_merge_data:
         await msg.reply_text("❌ Ошибка: данные не найдены")
         state.mode = None
@@ -2908,12 +2911,19 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         processed_club = data['club']
         state.processed_clubs_for_report.add(processed_club)
         
+        # ОТЛАДКА
+        await msg.reply_text(f"🔍 DEBUG: Добавлен {processed_club}. Всего: {state.processed_clubs_for_report}")
+        
         # Определяем оставшиеся клубы
         all_clubs = {'Москвич', 'Анора'}
         remaining_clubs = all_clubs - state.processed_clubs_for_report
         
+        # ОТЛАДКА
+        await msg.reply_text(f"🔍 DEBUG: Оставшиеся: {remaining_clubs}. Начинаем обработку? {len(remaining_clubs) > 0}")
+        
         # Если есть необработанные клубы - обрабатываем
         if remaining_clubs:
+            await msg.reply_text(f"🔍 DEBUG: Вызываем generate_and_send_report для {list(remaining_clubs)[0]}")
             # Используем msg для создания правильного update для дальнейших вызовов
             # Если msg есть (из callback), создаем новый Update с message из msg
             if msg and not update.message:
@@ -2933,11 +2943,16 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
                 # Если установлен режим ожидания - выходим
                 # После обработки дубликатов, эта функция вызовется СНОВА для того же клуба
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
+                    await msg.reply_text(f"🔍 DEBUG: Найдены дубликаты для {club}, выходим (return)")
                     return
+        
+        # ОТЛАДКА
+        await msg.reply_text(f"🔍 DEBUG: После цикла. Обработано клубов: {len(state.processed_clubs_for_report)}")
         
         # Проверяем - все ли клубы обработаны?
         # Этот блок выполнится ПОСЛЕ того как пользователь обработает дубликаты второго клуба
         if len(state.processed_clubs_for_report) == 2:
+            await msg.reply_text(f"🔍 DEBUG: ОБА КЛУБА ОБРАБОТАНЫ! Генерируем сводный отчет...")
             # Используем msg для update
             if msg and not update.message:
                 new_update = Update(
