@@ -2492,39 +2492,34 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         )
         return
     
-    # СОХРАНЯЕМ ОБЪЕДИНЕНИЕ В БД!
-    updated_count = 0
+    # Создаем словарь объединений (ТОЛЬКО для отчета, БД не изменяем!)
+    sb_name_merges = {}
     
     for i, group in enumerate(sb_duplicates):
         if i in indices_to_merge:
             main_name = group['main_name']
             
-            # Обновляем ВСЕ записи с похожими именами на основное имя
-            for op in group['operations']:
-                if op['name'] != main_name:
-                    success, msg = db.update_operation_name(
-                        club=data['club'],
-                        date=op['date'],
-                        code='СБ',
-                        channel=op['channel'],
-                        new_name=main_name
-                    )
-                    if success:
-                        updated_count += 1
+            # Для всех похожих имен указываем основное имя
+            for name in group['names']:
+                if name != main_name:
+                    sb_name_merges[name] = main_name
     
-    # Получаем ОБНОВЛЁННЫЕ данные из БД
-    updated_operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
+    # Получаем данные из БД (БЕЗ изменений!)
+    operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
     
-    # Генерируем отчёт с объединёнными данными
-    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(updated_operations)
+    # Генерируем отчёт с объединёнными данными (только для отчета)
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+        operations, 
+        sb_name_merges=sb_name_merges if sb_name_merges else None
+    )
     
-    # Краткая сводка с информацией об объединении
+    # Краткая сводка
     summary = format_report_summary(
         totals, 
         data['club'], 
         f"{data['date_from']} .. {data['date_to']}",
         len(report_rows),
-        updated_count
+        0  # Объединение только для отчета, не сохраняется в БД
     )
     
     await update.message.reply_text(summary)
@@ -3232,6 +3227,29 @@ async def handle_self_employed_remove(update: Update, state: UserState, code: st
     
     # Сбрасываем режим
     state.mode = None
+
+
+async def restore_sb_names_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда для восстановления имен СБ из журнала"""
+    user_id = update.effective_user.id
+    
+    # Проверка авторизации
+    if user_id not in AUTHORIZED_USERS:
+        await update.message.reply_text("🔒 Требуется авторизация")
+        return
+    
+    await update.message.reply_text("⏳ Восстанавливаю имена СБ из журнала...")
+    
+    restored_count, messages = db.restore_sb_names_from_log()
+    
+    if restored_count > 0:
+        response = [f"✅ Восстановлено записей: {restored_count}\n"]
+        response.extend(messages[:20])  # Показываем первые 20
+        if len(messages) > 20:
+            response.append(f"\n... и ещё {len(messages) - 20} записей")
+        await update.message.reply_text('\n'.join(response))
+    else:
+        await update.message.reply_text("ℹ️ Записей для восстановления не найдено")
 
 
 async def handle_journal_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
@@ -4130,6 +4148,7 @@ def main():
     
     # Регистрируем обработчики
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("restore_sb", restore_sb_names_command))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
