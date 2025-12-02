@@ -3054,6 +3054,10 @@ async def prepare_sb_merge(update: Update, state: UserState, club: str, date_fro
 async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str, 
                                   state: UserState = None, check_duplicates: bool = True):
     """Генерация и отправка отчета"""
+    # ОТЛАДКА
+    if state and state.report_club == 'оба':
+        await update.message.reply_text(f"🔍 DEBUG [generate_and_send_report]: НАЧАЛО для {club}")
+    
     operations = db.get_operations_by_period(club, date_from, date_to)
     
     if not operations:
@@ -3155,6 +3159,8 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
         if not hasattr(state, 'processed_clubs_for_report'):
             state.processed_clubs_for_report = set()
         state.processed_clubs_for_report.add(club)
+        # ОТЛАДКА
+        await update.message.reply_text(f"🔍 DEBUG [generate_and_send_report]: КОНЕЦ для {club}. Всего: {state.processed_clubs_for_report}")
 
 
 async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
