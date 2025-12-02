@@ -580,4 +580,31 @@ class Database:
         conn.close()
         
         return added
+    
+    def get_all_employees(self, club: str) -> List[Dict]:
+        """
+        Получить список всех уникальных сотрудников клуба
+        Возвращает список словарей с полями: code, name
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Получаем уникальные пары (код, имя)
+            cursor.execute("""
+                SELECT DISTINCT code, name_snapshot as name
+                FROM operations
+                WHERE club = ?
+                ORDER BY code, name_snapshot
+            """, (club,))
+            
+            rows = cursor.fetchall()
+            employees = [{'code': row[0], 'name': row[1]} for row in rows]
+            
+            conn.close()
+            return employees
+        except Exception as e:
+            print(f"Ошибка получения сотрудников: {e}")
+            conn.close()
+            return []
 

@@ -157,7 +157,8 @@ def get_main_keyboard():
         ['📋 СПИСОК', '📤 ЭКСПОРТ'],
         ['✏️ ИСПРАВИТЬ', '🗑️ УДАЛИТЬ'],
         ['📜 ЖУРНАЛ', '👔 САМОЗАНЯТЫЕ'],
-        ['❓ ПОМОЩЬ', '🚪 ЗАВЕРШИТЬ']
+        ['👥 СОТРУДНИКИ', '❓ ПОМОЩЬ'],
+        ['🚪 ЗАВЕРШИТЬ']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -186,6 +187,15 @@ def get_club_report_keyboard():
         [InlineKeyboardButton("🏢 Москвич", callback_data='report_club_moskvich')],
         [InlineKeyboardButton("🏢 Анора", callback_data='report_club_anora')],
         [InlineKeyboardButton("🏢🏢 ОБА", callback_data='report_club_both')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_club_employees_keyboard():
+    """Клавиатура выбора клуба для списка сотрудников"""
+    keyboard = [
+        [InlineKeyboardButton("🏢 Москвич", callback_data='employees_club_moskvich')],
+        [InlineKeyboardButton("🏢 Анора", callback_data='employees_club_anora')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -1034,6 +1044,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Команда "самозанятые"
     if text_lower in ['самозанятые', '👔 самозанятые']:
         await handle_self_employed_command(update, context, state)
+        return
+    
+    # Команда "сотрудники"
+    if text_lower in ['сотрудники', '👥 сотрудники']:
+        await update.message.reply_text(
+            "👥 Выберите клуб для просмотра сотрудников:",
+            reply_markup=get_club_employees_keyboard()
+        )
         return
     
     # Обработка режима добавления самозанятого
@@ -3451,6 +3469,49 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "🏢 Выберите клуб для удаления:",
             reply_markup=get_club_report_keyboard()
         )
+    
+    # Выбор клуба для списка сотрудников
+    elif query.data in ['employees_club_moskvich', 'employees_club_anora']:
+        club = 'Москвич' if query.data == 'employees_club_moskvich' else 'Анора'
+        await query.edit_message_text(f"👥 Формирую список сотрудников клуба {club}...")
+        
+        # Получаем уникальные пары (код, имя) из БД
+        employees = db.get_all_employees(club)
+        
+        if not employees:
+            await query.message.reply_text(f"❌ Нет сотрудников в клубе {club}")
+            return
+        
+        # Сортируем по коду, потом по имени
+        employees_sorted = sorted(employees, key=lambda x: (x['code'], x['name']))
+        
+        # Формируем текстовый файл
+        lines = [f"СОТРУДНИКИ КЛУБА {club.upper()}\n"]
+        lines.append("=" * 50 + "\n\n")
+        
+        for i, emp in enumerate(employees_sorted, 1):
+            lines.append(f"{i}. {emp['code']} - {emp['name']}\n")
+        
+        lines.append("\n" + "=" * 50 + "\n")
+        lines.append(f"Всего сотрудников: {len(employees_sorted)}")
+        
+        # Сохраняем во временный файл
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
+        temp_file.write(''.join(lines))
+        temp_file.close()
+        
+        # Отправляем файл
+        with open(temp_file.name, 'rb') as f:
+            await query.message.reply_document(
+                document=f,
+                filename=f"sotrudniki_{club.lower()}.txt",
+                caption=f"👥 Список сотрудников клуба {club}\nВсего: {len(employees_sorted)}"
+            )
+        
+        # Удаляем временный файл
+        import os
+        os.remove(temp_file.name)
     
     # Выбор клуба для отчёта / экспорта / списка
     elif query.data in ['report_club_moskvich', 'report_club_anora', 'report_club_both']:
