@@ -1892,7 +1892,63 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
                     'names_a': list(names_a)
                 })
     
-    if not merge_candidates:
+    # Проверяем СБ с похожими именами между клубами
+    sb_cross_club_matches = []
+    
+    # Получаем всех СБ из обоих клубов
+    sb_moskvich = [op for op in ops_moskvich if op['code'] == 'СБ' and op.get('name')]
+    sb_anora = [op for op in ops_anora if op['code'] == 'СБ' and op.get('name')]
+    
+    if sb_moskvich and sb_anora:
+        # Группируем по именам
+        from collections import defaultdict
+        sb_names_m = defaultdict(lambda: {'nal': 0, 'beznal': 0})
+        sb_names_a = defaultdict(lambda: {'nal': 0, 'beznal': 0})
+        
+        for op in sb_moskvich:
+            name = op['name'].strip()
+            if op['channel'] == 'нал':
+                sb_names_m[name]['nal'] += op['amount']
+            else:
+                sb_names_m[name]['beznal'] += op['amount']
+        
+        for op in sb_anora:
+            name = op['name'].strip()
+            if op['channel'] == 'нал':
+                sb_names_a[name]['nal'] += op['amount']
+            else:
+                sb_names_a[name]['beznal'] += op['amount']
+        
+        # Ищем похожие имена СБ между клубами
+        for name_m in sb_names_m.keys():
+            surnames_m = extract_surname_candidates(name_m)
+            
+            for name_a in sb_names_a.keys():
+                surnames_a = extract_surname_candidates(name_a)
+                
+                # Проверяем фамилии
+                has_matching_surname = False
+                for s_m in surnames_m:
+                    for s_a in surnames_a:
+                        surname_similarity = SequenceMatcher(None, s_m, s_a).ratio()
+                        if surname_similarity >= 0.90:
+                            has_matching_surname = True
+                            break
+                    if has_matching_surname:
+                        break
+                
+                if has_matching_surname:
+                    # Нашли СБ с похожими именами в разных клубах
+                    sb_cross_club_matches.append({
+                        'name_moskvich': name_m,
+                        'name_anora': name_a,
+                        'similarity': surname_similarity,
+                        'moskvich': sb_names_m[name_m],
+                        'anora': sb_names_a[name_a]
+                    })
+    
+    # Если нет совпадений по коду И нет СБ между клубами - генерируем простой сводный
+    if not merge_candidates and not sb_cross_club_matches:
         # Совпадений нет - генерируем сводный без объединения (просто все записи)
         await update.message.reply_text(
             "ℹ️ Совпадений не найдено\n"
@@ -1935,11 +1991,25 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     file_content.append(f"Период: {date_from} .. {date_to}\n")
     file_content.append("=" * 50 + "\n\n")
     
-    for i, candidate in enumerate(merge_candidates, 1):
-        file_content.append(f"{i}. {candidate['name']} {candidate['code']}\n")
-        file_content.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}\n")
-        file_content.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}\n")
-        file_content.append("\n")
+    # Совпадения по коду+имени
+    if merge_candidates:
+        file_content.append("🔸 СОВПАДЕНИЯ ПО КОДУ И ИМЕНИ:\n\n")
+        for i, candidate in enumerate(merge_candidates, 1):
+            file_content.append(f"{i}. {candidate['name']} {candidate['code']}\n")
+            file_content.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}\n")
+            file_content.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}\n")
+            file_content.append("\n")
+    
+    # Совпадения СБ между клубами
+    if sb_cross_club_matches:
+        file_content.append("\n🔸 СБ С ПОХОЖИМИ ИМЕНАМИ (разные клубы):\n\n")
+        start_idx = len(merge_candidates) + 1
+        for i, match in enumerate(sb_cross_club_matches, start_idx):
+            similarity_pct = int(match['similarity'] * 100)
+            file_content.append(f"{i}. СБ (Похожесть фамилий: {similarity_pct}%)\n")
+            file_content.append(f"   • Москвич: {match['name_moskvich']} - НАЛ {match['moskvich']['nal']:.0f}, БЕЗНАЛ {match['moskvich']['beznal']:.0f}\n")
+            file_content.append(f"   • Анора: {match['name_anora']} - НАЛ {match['anora']['nal']:.0f}, БЕЗНАЛ {match['anora']['beznal']:.0f}\n")
+            file_content.append("\n")
     
     file_content.append("=" * 50 + "\n")
     file_content.append("\n🔄 ОБЪЕДИНЕНИЕ ДЛЯ СВОДНОГО ОТЧЁТА:\n")
@@ -1957,9 +2027,11 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     temp_file.close()
     
     # Отправляем короткое сообщение с кнопками
-    count = len(merge_candidates)
+    total_count = len(merge_candidates) + len(sb_cross_club_matches)
     short_message = (
-        f"📋 Найдено совпадений: {count}\n\n"
+        f"📋 Найдено совпадений: {total_count}\n"
+        f"   • По коду+имени: {len(merge_candidates)}\n"
+        f"   • СБ между клубами: {len(sb_cross_club_matches)}\n\n"
         f"🔄 Объединение для сводного отчёта:\n"
         f"• Используйте кнопки ниже\n"
         f"• Или введите: ОК / ОК 1 / НЕ 1\n\n"
@@ -1980,8 +2052,9 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     # Удаляем временный файл
     os.remove(temp_file.name)
     
-    # Сохраняем кандидатов
+    # Сохраняем кандидатов (включая СБ)
     state.merge_candidates = merge_candidates
+    state.sb_cross_club_matches = sb_cross_club_matches  # Новое поле для СБ
     state.merge_period = (date_from, date_to)
     state.mode = 'awaiting_merge_confirm'
 
@@ -2004,10 +2077,14 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
     
     command = parts[0]
     
+    # Общее количество совпадений (обычные + СБ)
+    sb_matches = getattr(state, 'sb_cross_club_matches', [])
+    total_candidates = len(state.merge_candidates) + len(sb_matches)
+    
     if command in ['ок', 'ok']:
         # "ок" без номеров -> объединить ВСЕ
         if len(parts) == 1:
-            indices_to_merge = set(range(len(state.merge_candidates)))
+            indices_to_merge = set(range(total_candidates))
         else:
             # "ок 1 2" -> объединить ТОЛЬКО указанные
             try:
@@ -2019,7 +2096,7 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
         # "не 1 2" -> НЕ объединять указанные (объединить остальные)
         try:
             exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
-            indices_to_merge = set(range(len(state.merge_candidates))) - exclude_indices
+            indices_to_merge = set(range(total_candidates)) - exclude_indices
         except:
             await msg.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
             return
@@ -2036,27 +2113,36 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
         return
     
     # Преобразуем в формат excluded (для совместимости с generate_merged_report)
-    excluded = set(range(len(state.merge_candidates))) - indices_to_merge
+    excluded = set(range(total_candidates)) - indices_to_merge
+    
+    # Разделяем excluded на обычные и СБ
+    excluded_regular = excluded & set(range(len(state.merge_candidates)))
+    excluded_sb = excluded - excluded_regular
     
     # Уведомление о начале генерации
     merged_count = len(indices_to_merge)
     await msg.reply_text(
         f"⏳ Генерация сводного отчёта...\n"
-        f"Объединяется: {merged_count} из {len(state.merge_candidates)}"
+        f"Объединяется: {merged_count} из {total_candidates}"
     )
     
     # Генерируем сводный отчет (используем message если передан)
-    await generate_merged_report(update, state, excluded, message)
+    await generate_merged_report(update, state, excluded_regular, excluded_sb, message)
     
     # Очищаем
     state.mode = None
     state.report_club = None
     state.merge_candidates = None
+    state.sb_cross_club_matches = None
     state.merge_period = None
 
 
-async def generate_merged_report(update: Update, state: UserState, excluded: set, message=None):
-    """Генерация сводного отчета из ОБОИХ клубов"""
+async def generate_merged_report(update: Update, state: UserState, excluded_regular: set, excluded_sb: set, message=None):
+    """
+    Генерация сводного отчета из ОБОИХ клубов
+    excluded_regular: индексы обычных совпадений которые НЕ объединяем
+    excluded_sb: индексы СБ совпадений которые НЕ объединяем
+    """
     # Используем message если передан, иначе update.message
     msg = message if message else update.message
     
@@ -2076,7 +2162,7 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
     # Множество обработанных пар (код, имя)
     processed = set()
     
-    # 1. Добавляем ОБЪЕДИНЁННЫЕ записи (которые пользователь подтвердил)
+    # 1. Добавляем ОБЪЕДИНЁННЫЕ записи по коду+имени (которые пользователь подтвердил)
     for i, candidate in enumerate(state.merge_candidates):
         code = candidate['code']
         name = candidate['name']
@@ -2085,7 +2171,7 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
         name_variants = set(names_m + names_a)
         name_variants.add(name)
         
-        if i not in excluded:
+        if i not in excluded_regular:
             # ОБЪЕДИНЯЕМ - суммируем из обоих клубов
             total_nal = candidate['moskvich']['nal'] + candidate['anora']['nal']
             total_beznal = candidate['moskvich']['beznal'] + candidate['anora']['beznal']
@@ -2129,6 +2215,58 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
             for variant in name_variants:
                 processed.add(make_processed_key(code, variant))
     
+    # 1.5. Добавляем ОБЪЕДИНЁННЫЕ СБ между клубами
+    sb_matches = getattr(state, 'sb_cross_club_matches', [])
+    for i, match in enumerate(sb_matches):
+        sb_idx = len(state.merge_candidates) + i  # Индекс в общем списке
+        name_m = match['name_moskvich']
+        name_a = match['name_anora']
+        
+        if sb_idx not in excluded_sb:
+            # ОБЪЕДИНЯЕМ СБ - берем более полное имя
+            united_name = max(name_m, name_a, key=len)
+            total_nal = match['moskvich']['nal'] + match['anora']['nal']
+            total_beznal = match['moskvich']['beznal'] + match['anora']['beznal']
+            
+            if total_nal > 0:
+                merged_ops.append({
+                    'code': 'СБ', 'name': united_name, 'channel': 'нал',
+                    'amount': total_nal, 'date': date_from
+                })
+            if total_beznal > 0:
+                merged_ops.append({
+                    'code': 'СБ', 'name': united_name, 'channel': 'безнал',
+                    'amount': total_beznal, 'date': date_from
+                })
+            
+            processed.add(make_processed_key('СБ', name_m))
+            processed.add(make_processed_key('СБ', name_a))
+        else:
+            # НЕ объединяем - добавляем раздельно
+            if match['moskvich']['nal'] > 0:
+                merged_ops.append({
+                    'code': 'СБ', 'name': f"{name_m} (Москвич)", 'channel': 'нал',
+                    'amount': match['moskvich']['nal'], 'date': date_from
+                })
+            if match['moskvich']['beznal'] > 0:
+                merged_ops.append({
+                    'code': 'СБ', 'name': f"{name_m} (Москвич)", 'channel': 'безнал',
+                    'amount': match['moskvich']['beznal'], 'date': date_from
+                })
+            if match['anora']['nal'] > 0:
+                merged_ops.append({
+                    'code': 'СБ', 'name': f"{name_a} (Анора)", 'channel': 'нал',
+                    'amount': match['anora']['nal'], 'date': date_from
+                })
+            if match['anora']['beznal'] > 0:
+                merged_ops.append({
+                    'code': 'СБ', 'name': f"{name_a} (Анора)", 'channel': 'безнал',
+                    'amount': match['anora']['beznal'], 'date': date_from
+                })
+            
+            processed.add(make_processed_key('СБ', name_m))
+            processed.add(make_processed_key('СБ', name_a))
+    
     # 2. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (уникальные для каждого клуба)
     for op in ops_m + ops_a:
         if make_processed_key(op['code'], op['name']) not in processed:
@@ -2140,7 +2278,10 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
             report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_ops)
             
             # Краткая сводка вместо полного отчёта
-            merged_count = len(state.merge_candidates) - len(excluded) if state.merge_candidates else 0
+            merged_regular = len(state.merge_candidates) - len(excluded_regular) if state.merge_candidates else 0
+            merged_sb = len(sb_matches) - len(excluded_sb) if sb_matches else 0
+            merged_count = merged_regular + merged_sb
+            
             summary = format_report_summary(
                 totals, 
                 "СВОДНЫЙ (Москвич + Анора)", 
@@ -2618,12 +2759,12 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
         if remaining_clubs:
             for club in remaining_clubs:
                 await generate_and_send_report(update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
-                # Если установлен режим ожидания - выходим
+                # Если установлен режим ожидания - НЕ выходим, а продолжим после обработки
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
-                    return
+                    break
         
-        # Если ВСЕ клубы обработаны - генерируем сводный отчет
-        if len(state.processed_clubs_for_report) == 2:
+        # Если ВСЕ клубы обработаны И нет активных режимов ожидания - генерируем сводный отчет
+        if len(state.processed_clubs_for_report) == 2 and state.mode not in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
             await prepare_merged_report(update, state, data['date_from'], data['date_to'])
             
             # Очищаем состояние после завершения
@@ -2789,12 +2930,15 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
             # Обрабатываем оставшийся клуб через generate_and_send_report
             for club in remaining_clubs:
                 await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
-                # Если установлен режим ожидания - выходим
+                # Если установлен режим ожидания - НЕ выходим, а продолжим после обработки
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
-                    return
+                    # Прерываем цикл, но НЕ функцию - пусть обработается дубликат
+                    break
         
-        # Если ВСЕ клубы обработаны - генерируем сводный отчет
-        if len(state.processed_clubs_for_report) == 2:
+        # ВАЖНО: НЕ проверяем сразу len == 2, потому что второй клуб может быть
+        # в процессе обработки дубликатов. Проверку делаем после возврата из обработки.
+        # Если ВСЕ клубы обработаны И нет активных режимов ожидания - генерируем сводный отчет
+        if len(state.processed_clubs_for_report) == 2 and state.mode not in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
             # Используем msg для update
             if msg and not update.message:
                 new_update = Update(
