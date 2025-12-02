@@ -867,6 +867,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Генерируем отчет
         if state.report_club == 'оба':
+            # Инициализируем отслеживание обработанных клубов
+            state.processed_clubs_for_report = set()
+            
             # Сначала отчеты по каждому клубу
             for club in ['Москвич', 'Анора']:
                 await generate_and_send_report(update, club, date_from, date_to, state)
@@ -2598,11 +2601,45 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     
     os.remove(filename)
     
-    # Очищаем состояние
-    state.mode = None
-    state.duplicate_check_data = None
-    state.sb_merge_data = None
-    state.report_club = None
+    # Проверяем, был ли выбран "оба" клуба - если да, продолжаем обработку
+    if state.report_club == 'оба':
+        # Отслеживаем обработанные клубы чтобы избежать зацикленности
+        if not hasattr(state, 'processed_clubs_for_report'):
+            state.processed_clubs_for_report = set()
+        
+        processed_club = data['club']
+        state.processed_clubs_for_report.add(processed_club)
+        
+        # Определяем оставшиеся клубы
+        all_clubs = {'Москвич', 'Анора'}
+        remaining_clubs = all_clubs - state.processed_clubs_for_report
+        
+        # Если есть необработанные клубы - обрабатываем
+        if remaining_clubs:
+            for club in remaining_clubs:
+                await generate_and_send_report(update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
+                # Если установлен режим ожидания - выходим
+                if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
+                    return
+        
+        # Если ВСЕ клубы обработаны - генерируем сводный отчет
+        if len(state.processed_clubs_for_report) == 2:
+            await prepare_merged_report(update, state, data['date_from'], data['date_to'])
+            
+            # Очищаем состояние после завершения
+            state.mode = None
+            state.report_club = None
+            state.processed_clubs_for_report = set()
+            
+            # НЕ сбрасываем режим если ждём подтверждения объединения!
+            if state.mode == 'awaiting_merge_confirm':
+                return
+    else:
+        # Очищаем состояние
+        state.mode = None
+        state.duplicate_check_data = None
+        state.sb_merge_data = None
+        state.report_club = None
 
 
 async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -2703,7 +2740,7 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     
     summary = '\n'.join(summary_lines)
     
-    await update.message.reply_text(summary)
+    await msg.reply_text(summary)
     
     # Создаем XLSX
     club_translit = 'moskvich' if data['club'] == 'Москвич' else 'anora'
@@ -2713,7 +2750,7 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
                                   f"{data['date_from']} .. {data['date_to']}", filename, db)
     
     with open(filename, 'rb') as f:
-        await update.message.reply_document(
+        await msg.reply_document(
             document=f,
             filename=filename,
             caption=f"📊 Отчет {data['club']} ({data['date_from']} .. {data['date_to']})"
@@ -2723,38 +2760,62 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     
     # Проверяем, был ли выбран "оба" клуба - если да, продолжаем обработку
     if state.report_club == 'оба':
-        # Продолжаем обработку для второго клуба и сводного отчета
+        # Отслеживаем обработанные клубы чтобы избежать зацикленности
+        if not hasattr(state, 'processed_clubs_for_report'):
+            state.processed_clubs_for_report = set()
+        
         processed_club = data['club']
-        remaining_clubs = ['Москвич', 'Анора']
-        remaining_clubs.remove(processed_club)
+        state.processed_clubs_for_report.add(processed_club)
         
-        # Используем msg для создания правильного update для дальнейших вызовов
-        # Если msg есть (из callback), создаем новый Update с message из msg
-        if msg and not update.message:
-            # Создаем новый Update объект с message из msg
-            new_update = Update(
-                update_id=update.update_id,
-                message=msg,
-                effective_user=update.effective_user,
-                effective_chat=update.effective_chat
-            )
-        else:
-            new_update = update
+        # Определяем оставшиеся клубы
+        all_clubs = {'Москвич', 'Анора'}
+        remaining_clubs = all_clubs - state.processed_clubs_for_report
         
-        # Обрабатываем оставшийся клуб через generate_and_send_report
-        for club in remaining_clubs:
-            await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state)
-            # Если установлен режим ожидания - выходим
-            if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
-                return
+        # Если есть необработанные клубы - обрабатываем
+        if remaining_clubs:
+            # Используем msg для создания правильного update для дальнейших вызовов
+            # Если msg есть (из callback), создаем новый Update с message из msg
+            if msg and not update.message:
+                # Создаем новый Update объект с message из msg
+                new_update = Update(
+                    update_id=update.update_id,
+                    message=msg,
+                    effective_user=update.effective_user,
+                    effective_chat=update.effective_chat
+                )
+            else:
+                new_update = update
+            
+            # Обрабатываем оставшийся клуб через generate_and_send_report
+            for club in remaining_clubs:
+                await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
+                # Если установлен режим ожидания - выходим
+                if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
+                    return
         
-        # Если нет дубликатов - генерируем сводный отчет
-        await prepare_merged_report(new_update, state, data['date_from'], data['date_to'])
-        
-        # НЕ сбрасываем режим если ждём подтверждения объединения!
-        if state.mode != 'awaiting_merge_confirm':
+        # Если ВСЕ клубы обработаны - генерируем сводный отчет
+        if len(state.processed_clubs_for_report) == 2:
+            # Используем msg для update
+            if msg and not update.message:
+                new_update = Update(
+                    update_id=update.update_id,
+                    message=msg,
+                    effective_user=update.effective_user,
+                    effective_chat=update.effective_chat
+                )
+            else:
+                new_update = update
+            
+            await prepare_merged_report(new_update, state, data['date_from'], data['date_to'])
+            
+            # Очищаем состояние после завершения
             state.mode = None
             state.report_club = None
+            state.processed_clubs_for_report = set()
+            
+            # НЕ сбрасываем режим если ждём подтверждения объединения!
+            if state.mode == 'awaiting_merge_confirm':
+                return
     else:
         # Очищаем состояние
         state.mode = None
