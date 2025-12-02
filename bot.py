@@ -2503,6 +2503,7 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     
     # Создаем словарь объединений (ТОЛЬКО для отчета, БД не изменяем!)
     sb_name_merges = {}
+    merged_sb_count = 0  # Счетчик объединенных СБ
     
     for i, group in enumerate(sb_duplicates):
         if i in indices_to_merge:
@@ -2512,6 +2513,7 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
             for name in group['names']:
                 if name != main_name:
                     sb_name_merges[name] = main_name
+                    merged_sb_count += 1  # Считаем объединенные имена
     
     # Получаем данные из БД (БЕЗ изменений!)
     operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
@@ -2522,14 +2524,25 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         sb_name_merges=sb_name_merges if sb_name_merges else None
     )
     
-    # Краткая сводка
-    summary = format_report_summary(
-        totals, 
-        data['club'], 
-        f"{data['date_from']} .. {data['date_to']}",
-        len(report_rows),
-        0  # Объединение только для отчета, не сохраняется в БД
-    )
+    # Краткая сводка с информацией об объединенных СБ
+    summary_lines = []
+    summary_lines.append("✅ ОТЧЁТ ГОТОВ!\n")
+    summary_lines.append(f"🏢 Клуб: {data['club']}")
+    summary_lines.append(f"📅 Период: {data['date_from']} .. {data['date_to']}")
+    summary_lines.append(f"👥 Сотрудников: {len(report_rows)}")
+    
+    if merged_sb_count > 0:
+        summary_lines.append(f"🔄 Объединено СБ имён: {merged_sb_count} (только в отчете)")
+    
+    summary_lines.append("\n💰 ИТОГО:")
+    summary_lines.append(f"   НАЛ:      {totals['nal']:,.0f}".replace(',', ' '))
+    summary_lines.append(f"   БЕЗНАЛ:   {totals['beznal']:,.0f}".replace(',', ' '))
+    summary_lines.append(f"   10%:      {totals['minus10']:,.0f}".replace(',', ' '))
+    summary_lines.append(f"   {'─' * 25}")
+    summary_lines.append(f"   ИТОГО:    {totals['itog']:,.0f}".replace(',', ' '))
+    summary_lines.append("\n📄 Детальный отчёт в Excel файле ⬇️")
+    
+    summary = '\n'.join(summary_lines)
     
     await update.message.reply_text(summary)
     
@@ -2629,7 +2642,8 @@ async def prepare_sb_merge(update: Update, state: UserState, club: str, date_fro
     file_content.append("• ОК 1 2 → объединить пункты 1 и 2\n")
     file_content.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)\n")
     file_content.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2\n")
-    file_content.append("\nℹ️ Примечание: объединение сохраняется в БД\n")
+    file_content.append("\n⚠️ ВАЖНО: объединение применяется ТОЛЬКО для отчета\n")
+    file_content.append("          (база данных НЕ изменяется)\n")
     
     # Сохраняем во временный файл
     temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
@@ -2644,7 +2658,8 @@ async def prepare_sb_merge(update: Update, state: UserState, club: str, date_fro
         f"• Используйте кнопки ниже\n"
         f"• Или введите: ОК / ОК 1 / НЕ 1\n\n"
         f"📄 Детальный список в файле ⬇️\n\n"
-        f"ℹ️ Объединение сохраняется в БД"
+        f"⚠️ ВАЖНО: объединение применяется ТОЛЬКО для отчета\n"
+        f"          (база данных НЕ изменяется)"
     )
     
     # Отправляем файл и сообщение с кнопками
