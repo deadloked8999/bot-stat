@@ -2,6 +2,7 @@
 Модуль для работы с базой данных SQLite
 """
 import sqlite3
+import re
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 import config
@@ -256,6 +257,54 @@ class Database:
         conn.commit()
         conn.close()
         return True, f"Обновлено имя: {code} {channel} '{old_name}' → '{new_name}' ({date})"
+    
+    def restore_sb_names_from_log(self) -> Tuple[int, List[str]]:
+        """
+        Восстановление имен СБ из журнала edit_log
+        Возвращает: (количество восстановленных, список сообщений)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Находим все записи в журнале с merge_name для СБ
+        cursor.execute("""
+            SELECT club, date, code, channel, action, edited_at
+            FROM edit_log
+            WHERE code = 'СБ' AND action LIKE 'merge_name:%'
+            ORDER BY edited_at DESC
+        """)
+        
+        rows = cursor.fetchall()
+        restored_count = 0
+        messages = []
+        
+        for row in rows:
+            club, date, code, channel, action, edited_at = row
+            
+            # Извлекаем старое имя из action: 'merge_name: "{old_name}" -> "{new_name}"'
+            match = re.search(r'merge_name: "([^"]+)" -> "([^"]+)"', action)
+            if not match:
+                continue
+            
+            old_name = match.group(1)
+            new_name = match.group(2)
+            
+            # Восстанавливаем старое имя напрямую (без записи в журнал)
+            cursor.execute("""
+                UPDATE operations
+                SET name_snapshot = ?
+                WHERE club = ? AND date = ? AND code = ? AND channel = ?
+            """, (old_name, club, date, code, channel))
+            
+            if cursor.rowcount > 0:
+                restored_count += 1
+                messages.append(f"✅ {club} {date} {code} {channel}: '{new_name}' → '{old_name}'")
+            else:
+                messages.append(f"❌ {club} {date} {code} {channel}: запись не найдена")
+        
+        conn.commit()
+        conn.close()
+        return restored_count, messages
     
     def delete_operation(self, club: str, date: str, code: str, channel: str) -> Tuple[bool, str]:
         """Удалить операцию"""
