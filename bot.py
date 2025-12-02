@@ -2789,8 +2789,6 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     # Используем message если передан, иначе update.message
     msg = message if message else update.message
     
-    # ОТЛАДКА
-    await msg.reply_text(f"🔍 DEBUG [START]: report_club={state.report_club}, processed={getattr(state, 'processed_clubs_for_report', 'НЕТ')}")
     
     if not state.sb_merge_data:
         await msg.reply_text("❌ Ошибка: данные не найдены")
@@ -2911,19 +2909,14 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         processed_club = data['club']
         state.processed_clubs_for_report.add(processed_club)
         
-        # ОТЛАДКА
-        await msg.reply_text(f"🔍 DEBUG: Добавлен {processed_club}. Всего: {state.processed_clubs_for_report}")
         
         # Определяем оставшиеся клубы
         all_clubs = {'Москвич', 'Анора'}
         remaining_clubs = all_clubs - state.processed_clubs_for_report
         
-        # ОТЛАДКА
-        await msg.reply_text(f"🔍 DEBUG: Оставшиеся: {remaining_clubs}. Начинаем обработку? {len(remaining_clubs) > 0}")
         
         # Если есть необработанные клубы - обрабатываем
         if remaining_clubs:
-            await msg.reply_text(f"🔍 DEBUG: Вызываем generate_and_send_report для {list(remaining_clubs)[0]}")
             # Используем msg для создания правильного update для дальнейших вызовов
             # Если msg есть (из callback), просто используем исходный update
             # Он уже содержит всю нужную информацию
@@ -2931,24 +2924,18 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
             
             # Обрабатываем оставшийся клуб через generate_and_send_report
             for club in remaining_clubs:
-                await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
+                await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state, check_duplicates=True, message=msg)
                 # Если установлен режим ожидания - выходим
                 # После обработки дубликатов, эта функция вызовется СНОВА для того же клуба
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
-                    await msg.reply_text(f"🔍 DEBUG: Найдены дубликаты для {club}, выходим (return)")
                     return
             
-            # ВАЖНО: После обработки remaining_clubs проверяем - может все уже готово?
-            await msg.reply_text(f"🔍 DEBUG: После обработки {remaining_clubs}. Всего обработано: {len(state.processed_clubs_for_report)}")
         
-        # ОТЛАДКА
-        await msg.reply_text(f"🔍 DEBUG: После цикла. Обработано клубов: {len(state.processed_clubs_for_report)}")
         
         # Проверяем - все ли клубы обработаны?
         # Этот блок выполнится ПОСЛЕ того как пользователь обработает дубликаты второго клуба
         # ИЛИ сразу после обработки второго клуба если у него не было дубликатов
         if len(state.processed_clubs_for_report) == 2:
-            await msg.reply_text(f"🔍 DEBUG: ОБА КЛУБА ОБРАБОТАНЫ! Генерируем сводный отчет...")
             # Просто используем исходный update
             new_update = update
             
@@ -2969,9 +2956,22 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         state.report_club = None
 
 
+async def prepare_sb_merge_with_message(msg, state: UserState, club: str, date_from: str,
+                           date_to: str, operations: list, sb_duplicates: list):
+    """Подготовка объединения СБ с похожими именами (принимает message напрямую)"""
+    await prepare_sb_merge_internal(msg, state, club, date_from, date_to, operations, sb_duplicates)
+
+
 async def prepare_sb_merge(update: Update, state: UserState, club: str, date_from: str,
                            date_to: str, operations: list, sb_duplicates: list):
-    """Подготовка объединения СБ с похожими именами"""
+    """Подготовка объединения СБ с похожими именами (обертка для update)"""
+    msg = update.message
+    await prepare_sb_merge_internal(msg, state, club, date_from, date_to, operations, sb_duplicates)
+
+
+async def prepare_sb_merge_internal(msg, state: UserState, club: str, date_from: str,
+                           date_to: str, operations: list, sb_duplicates: list):
+    """Внутренняя функция подготовки объединения СБ"""
     # Создаем текстовый файл со списком СБ кандидатов
     file_content = ["📋 НАЙДЕНЫ СБ С ПОХОЖИМИ ИМЕНАМИ\n"]
     file_content.append(f"Клуб: {club}\n")
@@ -3030,7 +3030,7 @@ async def prepare_sb_merge(update: Update, state: UserState, club: str, date_fro
     
     # Отправляем файл и сообщение с кнопками
     with open(temp_file.name, 'rb') as f:
-        await update.message.reply_document(
+        await msg.reply_document(
             document=f,
             filename=f"sb_merge_{club}_{date_from}_{date_to}.txt",
             caption=short_message,
@@ -3052,16 +3052,15 @@ async def prepare_sb_merge(update: Update, state: UserState, club: str, date_fro
 
 
 async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str, 
-                                  state: UserState = None, check_duplicates: bool = True):
+                                  state: UserState = None, check_duplicates: bool = True, message=None):
     """Генерация и отправка отчета"""
-    # ОТЛАДКА
-    if state and state.report_club == 'оба':
-        await update.message.reply_text(f"🔍 DEBUG [generate_and_send_report]: НАЧАЛО для {club}")
+    # Определяем куда отправлять сообщения
+    msg = message if message else update.message
     
     operations = db.get_operations_by_period(club, date_from, date_to)
     
     if not operations:
-        await update.message.reply_text(
+        await msg.reply_text(
             f"📊 Отчет по клубу {club}\n"
             f"Период: {date_from} .. {date_to}\n\n"
             f"Данных нет."
@@ -3101,7 +3100,7 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
             response.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)")
             response.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2")
             
-            await update.message.reply_text('\n'.join(response))
+            await msg.reply_text('\n'.join(response))
             
             # Сохраняем данные для обработки
             state.duplicate_check_data = {
@@ -3120,7 +3119,7 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
         
         if sb_duplicates:
             # Показываем запрос на объединение СБ с инлайн-кнопками и файлом
-            await prepare_sb_merge(update, state, club, date_from, date_to, operations, sb_duplicates)
+            await prepare_sb_merge_with_message(msg, state, club, date_from, date_to, operations, sb_duplicates)
             return
     
     # Генерируем отчет (без дубликатов или после подтверждения)
@@ -3133,7 +3132,7 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
         f"{date_from} .. {date_to}",
         len(report_rows)
     )
-    await update.message.reply_text(summary)
+    await msg.reply_text(summary)
     
     # Создаем XLSX
     club_translit = 'moskvich' if club == 'Москвич' else 'anora'
@@ -3145,7 +3144,7 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
     
     # Отправляем файл
     with open(filename, 'rb') as f:
-        await update.message.reply_document(
+        await msg.reply_document(
             document=f,
             filename=filename,
             caption=f"📊 Отчет по клубу {club}\nПериод: {date_from} .. {date_to}"
