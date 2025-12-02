@@ -8,6 +8,7 @@ import tempfile
 from datetime import datetime
 from typing import Dict, Optional, Tuple, List
 from openpyxl import Workbook
+from difflib import SequenceMatcher
 
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
@@ -89,6 +90,9 @@ class UserState:
         
         # Для проверки дубликатов в отчёте
         self.duplicate_check_data: Optional[dict] = None
+        
+        # Для объединения СБ с похожими именами
+        self.sb_merge_data: Optional[dict] = None
         
         # Для предпросмотра данных
         self.preview_date: Optional[str] = None
@@ -334,7 +338,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cancelable_modes = [
             'awaiting_preview_date', 'awaiting_preview_action', 'awaiting_edit_line_number', 'awaiting_edit_line_data',
             'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
-            'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm',
+            'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
             'awaiting_export_club', 'awaiting_export_period',
             'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input',
             'awaiting_delete_mass_club', 'awaiting_delete_mass_period', 'awaiting_delete_mass_confirm',
@@ -349,6 +353,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.reset_input()
             state.mode = None
             state.duplicate_check_data = None
+            state.sb_merge_data = None
             state.report_club = None
             state.export_club = None
             state.list_club = None
@@ -609,6 +614,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_duplicate_confirmation(update, context, state, text, text_lower)
         return
     
+    if state.mode == 'awaiting_sb_merge_confirm':
+        await handle_sb_merge_confirmation(update, context, state, text, text_lower)
+        return
+    
     # Обработка подтверждения загрузки файла
     if state.mode == 'awaiting_upload_confirm':
         if text_lower == 'отмена' or text_lower == '❌ отмена':
@@ -855,8 +864,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Сначала отчеты по каждому клубу
             for club in ['Москвич', 'Анора']:
                 await generate_and_send_report(update, club, date_from, date_to, state)
-                # Если generate_and_send_report установил режим awaiting_duplicate_confirm - выходим
-                if state.mode == 'awaiting_duplicate_confirm':
+                # Если generate_and_send_report установил режим awaiting_duplicate_confirm или awaiting_sb_merge_confirm - выходим
+                if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
                     return
             
             # Затем проверяем возможность сводного отчета
@@ -871,7 +880,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await generate_and_send_report(update, club, date_from, date_to, state)
             
             # НЕ сбрасываем режим если ждём подтверждения дубликатов!
-            if state.mode != 'awaiting_duplicate_confirm':
+            if state.mode not in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
                 state.mode = None
                 state.report_club = None
         return
@@ -2181,6 +2190,129 @@ def find_code_duplicates(operations: list) -> list:
     return duplicates
 
 
+def name_similarity(name1: str, name2: str) -> float:
+    """Вычисление похожести двух имен (0.0 - 1.0)"""
+    if not name1 or not name2:
+        return 0.0
+    return SequenceMatcher(None, name1.lower().strip(), name2.lower().strip()).ratio()
+
+
+def normalize_name_variants(name: str) -> List[str]:
+    """Создание вариантов имени в разных порядках (ФИО, ИОФ, ОИФ)"""
+    if not name:
+        return ['']
+    
+    name = name.strip()
+    parts = name.split()
+    
+    if len(parts) <= 1:
+        return [name]
+    
+    # Убираем лишние пробелы и приводим к единому формату
+    normalized = ' '.join(part.strip() for part in parts if part.strip())
+    
+    # Если 2 части - только 2 варианта
+    if len(parts) == 2:
+        return [normalized, f"{parts[1]} {parts[0]}"]
+    
+    # Если 3+ части - создаем основные варианты
+    variants = set()
+    variants.add(normalized)  # Оригинальный порядок
+    
+    if len(parts) >= 2:
+        variants.add(f"{parts[1]} {parts[0]}")  # ИОФ
+        if len(parts) >= 3:
+            variants.add(f"{parts[0]} {parts[2]} {parts[1]}")  # ФОИ
+            variants.add(f"{parts[1]} {parts[0]} {parts[2]}")  # ИОФ (полный)
+    
+    return list(variants)
+
+
+def find_sb_name_duplicates(operations: list, similarity_threshold: float = 0.75) -> list:
+    """
+    Поиск СБ сотрудников с похожими именами для объединения
+    similarity_threshold: порог похожести (0.75 = 75%)
+    """
+    from collections import defaultdict
+    
+    # Фильтруем только СБ
+    sb_operations = [op for op in operations if op['code'] == 'СБ' and op.get('name')]
+    
+    if len(sb_operations) < 2:
+        return []
+    
+    # Группируем по именам
+    by_name = defaultdict(list)
+    for op in sb_operations:
+        name = op['name'].strip()
+        if name:
+            by_name[name].append(op)
+    
+    # Находим похожие имена
+    name_groups = []
+    processed_names = set()
+    
+    names_list = list(by_name.keys())
+    
+    for i, name1 in enumerate(names_list):
+        if name1 in processed_names:
+            continue
+        
+        # Создаем варианты для name1
+        variants1 = normalize_name_variants(name1)
+        
+        # Ищем похожие имена
+        similar_names = [name1]
+        group_max_similarity = 0.0
+        
+        for j, name2 in enumerate(names_list[i+1:], i+1):
+            if name2 in processed_names:
+                continue
+            
+            # Создаем варианты для name2
+            variants2 = normalize_name_variants(name2)
+            
+            # Сравниваем все варианты
+            max_similarity = 0.0
+            for v1 in variants1:
+                for v2 in variants2:
+                    similarity = name_similarity(v1, v2)
+                    max_similarity = max(max_similarity, similarity)
+            
+            # Если похожесть выше порога - добавляем в группу
+            if max_similarity >= similarity_threshold:
+                similar_names.append(name2)
+                processed_names.add(name2)
+                group_max_similarity = max(group_max_similarity, max_similarity)
+        
+        # Если нашли похожие - создаем группу
+        if len(similar_names) > 1:
+            processed_names.add(name1)
+            
+            # Собираем все операции для этой группы
+            group_operations = []
+            for name in similar_names:
+                group_operations.extend(by_name[name])
+            
+            # Вычисляем суммы
+            total_nal = sum(op['amount'] for op in group_operations if op['channel'] == 'нал')
+            total_beznal = sum(op['amount'] for op in group_operations if op['channel'] == 'безнал')
+            
+            # Определяем основное имя (самое длинное или первое)
+            main_name = max(similar_names, key=len)
+            
+            name_groups.append({
+                'names': similar_names,
+                'main_name': main_name,
+                'operations': group_operations,
+                'total_nal': total_nal,
+                'total_beznal': total_beznal,
+                'similarity': group_max_similarity if group_max_similarity > 0 else 1.0
+            })
+    
+    return name_groups
+
+
 async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                        state: UserState, text: str, text_lower: str):
     """Обработка подтверждения объединения дубликатов"""
@@ -2264,6 +2396,13 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     # Получаем ОБНОВЛЁННЫЕ данные из БД
     updated_operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
     
+    # Проверяем СБ с похожими именами после обработки дубликатов кода
+    sb_duplicates = find_sb_name_duplicates(updated_operations)
+    if sb_duplicates:
+        # Показываем запрос на объединение СБ
+        await prepare_sb_merge(update, state, data['club'], data['date_from'], data['date_to'], updated_operations, sb_duplicates)
+        return
+    
     # Генерируем отчёт с объединёнными данными
     report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(updated_operations)
     
@@ -2297,7 +2436,221 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
     # Очищаем состояние
     state.mode = None
     state.duplicate_check_data = None
+    state.sb_merge_data = None
     state.report_club = None
+
+
+async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                      state: UserState, text: str, text_lower: str):
+    """Обработка подтверждения объединения СБ с похожими именами"""
+    if not state.sb_merge_data:
+        await update.message.reply_text("❌ Ошибка: данные не найдены")
+        state.mode = None
+        return
+    
+    data = state.sb_merge_data
+    sb_duplicates = data['sb_duplicates']
+    
+    # Обработка ответа
+    indices_to_merge = set()
+    
+    # Убираем знаки препинания
+    normalized_text = text_lower.replace(',', ' ').replace('.', ' ')
+    parts = normalized_text.split()
+    
+    if not parts:
+        await update.message.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
+        return
+    
+    command = parts[0]
+    
+    if command in ['ок', 'ok']:
+        if len(parts) == 1:
+            indices_to_merge = set(range(len(sb_duplicates)))
+        else:
+            try:
+                indices_to_merge = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            except:
+                await update.message.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
+                return
+    elif command in ['не', 'net', 'нет']:
+        try:
+            exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
+            indices_to_merge = set(range(len(sb_duplicates))) - exclude_indices
+        except:
+            await update.message.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
+            return
+    else:
+        await update.message.reply_text(
+            "❌ Неверная команда.\n\n"
+            "Используйте:\n"
+            "• ок - объединить все\n"
+            "• ок 1 - объединить только пункт 1\n"
+            "• ок 1 2 - объединить пункты 1 и 2\n"
+            "• не 1 - НЕ объединять пункт 1 (остальные объединить)\n"
+            "• не 1 2 - НЕ объединять пункты 1 и 2"
+        )
+        return
+    
+    # СОХРАНЯЕМ ОБЪЕДИНЕНИЕ В БД!
+    updated_count = 0
+    
+    for i, group in enumerate(sb_duplicates):
+        if i in indices_to_merge:
+            main_name = group['main_name']
+            
+            # Обновляем ВСЕ записи с похожими именами на основное имя
+            for op in group['operations']:
+                if op['name'] != main_name:
+                    success, msg = db.update_operation_name(
+                        club=data['club'],
+                        date=op['date'],
+                        code='СБ',
+                        channel=op['channel'],
+                        new_name=main_name
+                    )
+                    if success:
+                        updated_count += 1
+    
+    # Получаем ОБНОВЛЁННЫЕ данные из БД
+    updated_operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
+    
+    # Генерируем отчёт с объединёнными данными
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(updated_operations)
+    
+    # Краткая сводка с информацией об объединении
+    summary = format_report_summary(
+        totals, 
+        data['club'], 
+        f"{data['date_from']} .. {data['date_to']}",
+        len(report_rows),
+        updated_count
+    )
+    
+    await update.message.reply_text(summary)
+    
+    # Создаем XLSX
+    club_translit = 'moskvich' if data['club'] == 'Москвич' else 'anora'
+    filename = f"otchet_{club_translit}_{data['date_from']}_{data['date_to']}.xlsx"
+    
+    ReportGenerator.generate_xlsx(report_rows, totals, data['club'], 
+                                  f"{data['date_from']} .. {data['date_to']}", filename, db)
+    
+    with open(filename, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=filename,
+            caption=f"📊 Отчет {data['club']} ({data['date_from']} .. {data['date_to']})"
+        )
+    
+    os.remove(filename)
+    
+    # Проверяем, был ли выбран "оба" клуба - если да, продолжаем обработку
+    if state.report_club == 'оба':
+        # Продолжаем обработку для второго клуба и сводного отчета
+        processed_club = data['club']
+        remaining_clubs = ['Москвич', 'Анора']
+        remaining_clubs.remove(processed_club)
+        
+        # Обрабатываем оставшийся клуб через generate_and_send_report
+        for club in remaining_clubs:
+            await generate_and_send_report(update, club, data['date_from'], data['date_to'], state)
+            # Если установлен режим ожидания - выходим
+            if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
+                return
+        
+        # Если нет дубликатов - генерируем сводный отчет
+        await prepare_merged_report(update, state, data['date_from'], data['date_to'])
+        
+        # НЕ сбрасываем режим если ждём подтверждения объединения!
+        if state.mode != 'awaiting_merge_confirm':
+            state.mode = None
+            state.report_club = None
+    else:
+        # Очищаем состояние
+        state.mode = None
+        state.sb_merge_data = None
+        state.report_club = None
+
+
+async def prepare_sb_merge(update: Update, state: UserState, club: str, date_from: str,
+                           date_to: str, operations: list, sb_duplicates: list):
+    """Подготовка объединения СБ с похожими именами"""
+    # Создаем текстовый файл со списком СБ кандидатов
+    file_content = ["📋 НАЙДЕНЫ СБ С ПОХОЖИМИ ИМЕНАМИ\n"]
+    file_content.append(f"Клуб: {club}\n")
+    file_content.append(f"Период: {date_from} .. {date_to}\n")
+    file_content.append("=" * 50 + "\n\n")
+    
+    for i, group in enumerate(sb_duplicates, 1):
+        similarity_pct = int(group['similarity'] * 100)
+        file_content.append(f"{i}. Группа: {group['main_name']}\n")
+        file_content.append(f"   Похожесть: {similarity_pct}%\n")
+        
+        # Группируем операции по именам для отображения
+        by_name = {}
+        for op in group['operations']:
+            name = op['name']
+            if name not in by_name:
+                by_name[name] = {'nal': 0, 'beznal': 0}
+            if op['channel'] == 'нал':
+                by_name[name]['nal'] += op['amount']
+            else:
+                by_name[name]['beznal'] += op['amount']
+        
+        for name in group['names']:
+            if name in by_name:
+                file_content.append(f"   • {name}: НАЛ {by_name[name]['nal']:.0f}, БЕЗНАЛ {by_name[name]['beznal']:.0f}\n")
+        
+        file_content.append(f"   ИТОГО: НАЛ {group['total_nal']:.0f}, БЕЗНАЛ {group['total_beznal']:.0f}\n")
+        file_content.append("\n")
+    
+    file_content.append("=" * 50 + "\n")
+    file_content.append("\n🔄 ОБЪЕДИНЕНИЕ СБ:\n")
+    file_content.append("• ОК → объединить все\n")
+    file_content.append("• ОК 1 → объединить только пункт 1\n")
+    file_content.append("• ОК 1 2 → объединить пункты 1 и 2\n")
+    file_content.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)\n")
+    file_content.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2\n")
+    file_content.append("\nℹ️ Примечание: объединение сохраняется в БД\n")
+    
+    # Сохраняем во временный файл
+    temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
+    temp_file.write(''.join(file_content))
+    temp_file.close()
+    
+    # Отправляем короткое сообщение с кнопками
+    count = len(sb_duplicates)
+    short_message = (
+        f"📋 Найдено групп СБ: {count}\n\n"
+        f"🔄 Объединение СБ с похожими именами:\n"
+        f"• Используйте кнопки ниже\n"
+        f"• Или введите: ОК / ОК 1 / НЕ 1\n\n"
+        f"📄 Детальный список в файле ⬇️\n\n"
+        f"ℹ️ Объединение сохраняется в БД"
+    )
+    
+    # Отправляем файл и сообщение с кнопками
+    with open(temp_file.name, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=f"sb_merge_{club}_{date_from}_{date_to}.txt",
+            caption=short_message,
+            reply_markup=get_merge_confirmation_keyboard()
+        )
+    
+    # Удаляем временный файл
+    os.remove(temp_file.name)
+    
+    # Сохраняем данные для обработки
+    state.sb_merge_data = {
+        'club': club,
+        'date_from': date_from,
+        'date_to': date_to,
+        'operations': operations,
+        'sb_duplicates': sb_duplicates
+    }
+    state.mode = 'awaiting_sb_merge_confirm'
 
 
 async def generate_and_send_report(update: Update, club: str, date_from: str, date_to: str, 
@@ -2357,6 +2710,15 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
                 'duplicates': duplicates
             }
             state.mode = 'awaiting_duplicate_confirm'
+            return
+    
+    # Проверка на СБ с похожими именами (после проверки дубликатов кода)
+    if check_duplicates and state:
+        sb_duplicates = find_sb_name_duplicates(operations)
+        
+        if sb_duplicates:
+            # Показываем запрос на объединение СБ с инлайн-кнопками и файлом
+            await prepare_sb_merge(update, state, club, date_from, date_to, operations, sb_duplicates)
             return
     
     # Генерируем отчет (без дубликатов или после подтверждения)
@@ -2695,41 +3057,82 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Обработка объединения совпадений
     elif query.data == 'merge_all':
-        if state.mode != 'awaiting_merge_confirm' or not state.merge_candidates:
+        if state.mode == 'awaiting_merge_confirm' and state.merge_candidates:
+            await query.edit_message_reply_markup(None)
+            await handle_merge_confirmation(update, state, 'ок', message=query.message)
+        elif state.mode == 'awaiting_sb_merge_confirm' and state.sb_merge_data:
+            await query.edit_message_reply_markup(None)
+            await handle_sb_merge_confirmation(update, context, state, 'ок', 'ок')
+        else:
             await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
-            return
-        await query.edit_message_reply_markup(None)
-        await handle_merge_confirmation(update, state, 'ок', message=query.message)
     
     elif query.data == 'merge_none':
-        if state.mode != 'awaiting_merge_confirm' or not state.merge_candidates:
+        if state.mode == 'awaiting_merge_confirm' and state.merge_candidates:
+            # Формируем команду "не" со всеми номерами
+            all_numbers = ' '.join(str(i+1) for i in range(len(state.merge_candidates)))
+            await query.edit_message_reply_markup(None)
+            await handle_merge_confirmation(update, state, f'не {all_numbers}', message=query.message)
+        elif state.mode == 'awaiting_sb_merge_confirm' and state.sb_merge_data:
+            # Формируем команду "не" со всеми номерами
+            sb_duplicates = state.sb_merge_data['sb_duplicates']
+            all_numbers = ' '.join(str(i+1) for i in range(len(sb_duplicates)))
+            await query.edit_message_reply_markup(None)
+            await handle_sb_merge_confirmation(update, context, state, f'не {all_numbers}', f'не {all_numbers}')
+        else:
             await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
-            return
-        # Формируем команду "не" со всеми номерами
-        all_numbers = ' '.join(str(i+1) for i in range(len(state.merge_candidates)))
-        await query.edit_message_reply_markup(None)
-        await handle_merge_confirmation(update, state, f'не {all_numbers}', message=query.message)
     
     elif query.data == 'merge_show_list':
-        if state.mode != 'awaiting_merge_confirm' or not state.merge_candidates:
+        if state.mode == 'awaiting_merge_confirm' and state.merge_candidates:
+            # Показываем список частями (по 15 записей)
+            await query.answer("📄 Отправляю список...")
+            candidates = state.merge_candidates
+            chunk_size = 15
+            
+            for chunk_start in range(0, len(candidates), chunk_size):
+                chunk = candidates[chunk_start:chunk_start + chunk_size]
+                response = [f"📋 Совпадения ({chunk_start + 1}-{min(chunk_start + chunk_size, len(candidates))} из {len(candidates)}):\n"]
+                
+                for i, candidate in enumerate(chunk, chunk_start + 1):
+                    response.append(f"{i}. {candidate['name']} {candidate['code']}")
+                    response.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}")
+                    response.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}")
+                    response.append("")
+                
+                await query.message.reply_text('\n'.join(response))
+        elif state.mode == 'awaiting_sb_merge_confirm' and state.sb_merge_data:
+            # Показываем список СБ частями
+            await query.answer("📄 Отправляю список...")
+            sb_duplicates = state.sb_merge_data['sb_duplicates']
+            chunk_size = 15
+            
+            for chunk_start in range(0, len(sb_duplicates), chunk_size):
+                chunk = sb_duplicates[chunk_start:chunk_start + chunk_size]
+                response = [f"📋 СБ с похожими именами ({chunk_start + 1}-{min(chunk_start + chunk_size, len(sb_duplicates))} из {len(sb_duplicates)}):\n"]
+                
+                for i, group in enumerate(chunk, chunk_start + 1):
+                    similarity_pct = int(group['similarity'] * 100)
+                    response.append(f"{i}. Группа: {group['main_name']} (Похожесть: {similarity_pct}%)")
+                    
+                    # Группируем операции по именам
+                    by_name = {}
+                    for op in group['operations']:
+                        name = op['name']
+                        if name not in by_name:
+                            by_name[name] = {'nal': 0, 'beznal': 0}
+                        if op['channel'] == 'нал':
+                            by_name[name]['nal'] += op['amount']
+                        else:
+                            by_name[name]['beznal'] += op['amount']
+                    
+                    for name in group['names']:
+                        if name in by_name:
+                            response.append(f"   • {name}: НАЛ {by_name[name]['nal']:.0f}, БЕЗНАЛ {by_name[name]['beznal']:.0f}")
+                    response.append(f"   ИТОГО: НАЛ {group['total_nal']:.0f}, БЕЗНАЛ {group['total_beznal']:.0f}")
+                    response.append("")
+                
+                await query.message.reply_text('\n'.join(response))
+        else:
             await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
-            return
-        # Показываем список частями (по 15 записей)
-        await query.answer("📄 Отправляю список...")
-        candidates = state.merge_candidates
-        chunk_size = 15
-        
-        for chunk_start in range(0, len(candidates), chunk_size):
-            chunk = candidates[chunk_start:chunk_start + chunk_size]
-            response = [f"📋 Совпадения ({chunk_start + 1}-{min(chunk_start + chunk_size, len(candidates))} из {len(candidates)}):\n"]
-            
-            for i, candidate in enumerate(chunk, chunk_start + 1):
-                response.append(f"{i}. {candidate['name']} {candidate['code']}")
-                response.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}")
-                response.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}")
-                response.append("")
-            
-            await query.message.reply_text('\n'.join(response))
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
