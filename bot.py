@@ -3638,6 +3638,29 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_reply_markup(None)
         await handle_delete_mass_confirm_message(query.message, state, False)
     
+    # Подтверждение замены объединённых сотрудников при загрузке файла
+    elif query.data == 'upload_merge_yes':
+        await query.edit_message_reply_markup(None)
+        await query.edit_message_text(
+            query.message.text + "\n\n✅ Применяю замены..."
+        )
+        # Устанавливаем флаг применения замен
+        state.upload_file_data['apply_employee_merges'] = True
+        state.upload_file_data['merge_check_done'] = True
+        # Продолжаем сохранение
+        await save_file_data_continue(query.message, state)
+    
+    elif query.data == 'upload_merge_no':
+        await query.edit_message_reply_markup(None)
+        await query.edit_message_text(
+            query.message.text + "\n\n❌ Сохраняю как в файле..."
+        )
+        # НЕ применяем замены
+        state.upload_file_data['apply_employee_merges'] = False
+        state.upload_file_data['merge_check_done'] = True
+        # Продолжаем сохранение
+        await save_file_data_continue(query.message, state)
+    
     # Подтверждение объединения сотрудников
     elif query.data == 'merge_employees_confirm':
         await query.edit_message_reply_markup(None)
@@ -4724,6 +4747,52 @@ async def show_file_preview(update: Update, state: UserState):
             await update.message.reply_text(part)
 
 
+async def save_file_data_continue(message, state: UserState):
+    """Продолжение сохранения файла после подтверждения замен"""
+    # Вызываем save_file_data, но через Message объект
+    # Создаём временный Update объект
+    class FakeUpdate:
+        def __init__(self, msg):
+            self.message = msg
+            self.effective_user = msg.from_user if hasattr(msg, 'from_user') else None
+    
+    fake_update = FakeUpdate(message)
+    await save_file_data(fake_update, state)
+
+
+async def show_merge_warning(update: Update, state: UserState, found_merges: List[Dict]):
+    """Показать предупреждение о найденных объединённых сотрудниках"""
+    lines = []
+    lines.append("⚠️ ОБНАРУЖЕНЫ ОБЪЕДИНЁННЫЕ СОТРУДНИКИ")
+    lines.append("")
+    lines.append("В файле найдены сотрудники, которые ранее были объединены:")
+    lines.append("")
+    
+    for merge in found_merges:
+        lines.append(f"📌 {merge['channel'].upper()}")
+        lines.append(f"   • {merge['original_code']} - {merge['original_name']}")
+        lines.append(f"   → объединён с {merge['merged_code']} - {merge['merged_name']}")
+        lines.append("")
+    
+    lines.append("💡 Что делать?")
+    lines.append("")
+    lines.append("✅ ДА - сохранить как объединённые")
+    lines.append(f"   (данные будут записаны с новыми кодами)")
+    lines.append("")
+    lines.append("❌ НЕТ - сохранить как в файле")
+    lines.append(f"   (игнорировать объединение)")
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ ДА, ЗАМЕНИТЬ", callback_data='upload_merge_yes')],
+        [InlineKeyboardButton("❌ НЕТ, КАК В ФАЙЛЕ", callback_data='upload_merge_no')]
+    ]
+    
+    await update.message.reply_text(
+        '\n'.join(lines),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def save_file_data(update: Update, state: UserState):
     """Сохранение данных из файла в БД с учетом объединений доплат"""
     data = state.upload_file_data
@@ -4736,6 +4805,47 @@ async def save_file_data(update: Update, state: UserState):
     # Сохраняем значения до очистки
     club = state.upload_file_club
     date = state.upload_file_date
+    
+    # НОВАЯ ЛОГИКА: Проверяем объединённых сотрудников
+    if not data.get('merge_check_done'):
+        found_merges = []
+        
+        # Проверяем безнал
+        for item in beznal_list:
+            if item.get('is_additional', False):
+                continue
+            merge_info = db.check_employee_merge(club, item['code'], item['name'])
+            if merge_info:
+                found_merges.append({
+                    'channel': 'безнал',
+                    'original_code': item['code'],
+                    'original_name': item['name'],
+                    'merged_code': merge_info['merged_code'],
+                    'merged_name': merge_info['merged_name']
+                })
+        
+        # Проверяем нал
+        for item in nal_list:
+            if item.get('is_additional', False):
+                continue
+            merge_info = db.check_employee_merge(club, item['code'], item['name'])
+            if merge_info:
+                found_merges.append({
+                    'channel': 'нал',
+                    'original_code': item['code'],
+                    'original_name': item['name'],
+                    'merged_code': merge_info['merged_code'],
+                    'merged_name': merge_info['merged_name']
+                })
+        
+        # Если нашли объединения - показываем предупреждение
+        if found_merges:
+            state.upload_file_data['found_merges'] = found_merges
+            await show_merge_warning(update, state, found_merges)
+            return  # Ждём подтверждения
+        
+        # Если не нашли - продолжаем сохранение
+        data['merge_check_done'] = True
     
     # Создаем словари для объединений ОТДЕЛЬНО ДЛЯ БЕЗНАЛ И НАЛ
     beznal_merge_dict = {}
@@ -4777,6 +4887,19 @@ async def save_file_data(update: Update, state: UserState):
                 'name': merge['main_items'][0]['name'] if merge['main_items'] else ''
             }
     
+    # Создаём словарь замен для объединённых сотрудников
+    employee_replacements = {}
+    found_merges = data.get('found_merges', [])
+    apply_merges = data.get('apply_employee_merges', False)  # True если пользователь нажал ДА
+    
+    if apply_merges and found_merges:
+        for merge in found_merges:
+            key = f"{merge['original_code']}_{merge['original_name']}"
+            employee_replacements[key] = {
+                'code': merge['merged_code'],
+                'name': merge['merged_name']
+            }
+    
     saved_count = 0
     
     # Сохраняем безнал
@@ -4786,13 +4909,19 @@ async def save_file_data(update: Update, state: UserState):
             continue
             
         code = item['code']
-        # Если код объединяется - используем итоговую сумму
-        if code in beznal_merge_dict:
-            amount = beznal_merge_dict[code]['amount']
-            name = beznal_merge_dict[code]['name']
+        name = item['name']
+        
+        # Проверяем замены для объединённых сотрудников
+        key = f"{code}_{name}"
+        if key in employee_replacements:
+            code = employee_replacements[key]['code']
+            name = employee_replacements[key]['name']
+        
+        # Если код объединяется (доплаты) - используем итоговую сумму
+        if item['code'] in beznal_merge_dict:
+            amount = beznal_merge_dict[item['code']]['amount']
         else:
             amount = item['amount']
-            name = item['name']
             
         db.add_or_update_operation(
             club=club,
@@ -4813,13 +4942,19 @@ async def save_file_data(update: Update, state: UserState):
             continue
             
         code = item['code']
-        # Если код объединяется - используем итоговую сумму
-        if code in nal_merge_dict:
-            amount = nal_merge_dict[code]['amount']
-            name = nal_merge_dict[code]['name']
+        name = item['name']
+        
+        # Проверяем замены для объединённых сотрудников
+        key = f"{code}_{name}"
+        if key in employee_replacements:
+            code = employee_replacements[key]['code']
+            name = employee_replacements[key]['name']
+        
+        # Если код объединяется (доплаты) - используем итоговую сумму
+        if item['code'] in nal_merge_dict:
+            amount = nal_merge_dict[item['code']]['amount']
         else:
             amount = item['amount']
-            name = item['name']
             
         db.add_or_update_operation(
             club=club,

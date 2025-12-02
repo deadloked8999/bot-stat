@@ -40,6 +40,19 @@ class Database:
             )
         """)
         
+        # Таблица объединений сотрудников
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS employee_merges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                club TEXT NOT NULL,
+                original_code TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                merged_code TEXT NOT NULL,
+                merged_name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        
         # Таблица журнала правок
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS edit_log (
@@ -610,7 +623,7 @@ class Database:
     
     def merge_employees(self, club: str, main_code: str, main_name: str, employees_to_merge: List[Dict]) -> int:
         """
-        Объединить сотрудников в БД - все записи получат код и имя главного сотрудника
+        Объединить сотрудников в БД - перенести данные и объединить
         
         Args:
             club: название клуба
@@ -625,17 +638,60 @@ class Database:
         cursor = conn.cursor()
         
         total_updated = 0
+        now = datetime.now().isoformat()
         
         try:
             for emp in employees_to_merge:
-                # Обновляем все записи этого сотрудника
+                # Записываем объединение в таблицу employee_merges
                 cursor.execute("""
-                    UPDATE operations
-                    SET code = ?, name_snapshot = ?
-                    WHERE club = ? AND code = ? AND name_snapshot = ?
-                """, (main_code, main_name, club, emp['code'], emp['name']))
+                    INSERT INTO employee_merges (club, original_code, original_name, merged_code, merged_name, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (club, emp['code'], emp['name'], main_code, main_name, now))
                 
-                total_updated += cursor.rowcount
+                # Получаем все записи сотрудника которого объединяем
+                cursor.execute("""
+                    SELECT date, channel, amount, original_line
+                    FROM operations
+                    WHERE club = ? AND code = ? AND name_snapshot = ?
+                """, (club, emp['code'], emp['name']))
+                
+                records = cursor.fetchall()
+                
+                # Для каждой записи:
+                # 1. Проверяем есть ли уже запись с (club, date, main_code, channel)
+                # 2. Если есть - агрегируем (добавляем amount)
+                # 3. Если нет - создаём новую с main_code
+                for date, channel, amount, original_line in records:
+                    # Проверяем существование
+                    cursor.execute("""
+                        SELECT id, amount FROM operations
+                        WHERE club = ? AND date = ? AND code = ? AND channel = ?
+                    """, (club, date, main_code, channel))
+                    
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # Агрегируем
+                        new_amount = existing[1] + amount
+                        cursor.execute("""
+                            UPDATE operations
+                            SET amount = ?, name_snapshot = ?
+                            WHERE id = ?
+                        """, (new_amount, main_name, existing[0]))
+                    else:
+                        # Создаём новую запись
+                        cursor.execute("""
+                            INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (club, date, main_code, main_name, channel, amount, original_line, now))
+                    
+                    total_updated += 1
+                
+                # Удаляем старые записи
+                cursor.execute("""
+                    DELETE FROM operations
+                    WHERE club = ? AND code = ? AND name_snapshot = ?
+                """, (club, emp['code'], emp['name']))
             
             conn.commit()
             conn.close()
@@ -645,4 +701,33 @@ class Database:
             conn.rollback()
             conn.close()
             return 0
+    
+    def check_employee_merge(self, club: str, code: str, name: str) -> Optional[Dict]:
+        """
+        Проверить был ли сотрудник объединён ранее
+        
+        Returns:
+            None если не объединён, или {'merged_code': ..., 'merged_name': ...}
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT merged_code, merged_name
+                FROM employee_merges
+                WHERE club = ? AND original_code = ? AND original_name = ?
+                LIMIT 1
+            """, (club, code, name))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return {'merged_code': row[0], 'merged_name': row[1]}
+            return None
+        except Exception as e:
+            print(f"Ошибка проверки объединения: {e}")
+            conn.close()
+            return None
 
