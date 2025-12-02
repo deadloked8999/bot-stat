@@ -99,6 +99,11 @@ class UserState:
         self.sb_merges_moskvich: Optional[dict] = None
         self.sb_merges_anora: Optional[dict] = None
         
+        # Для объединения сотрудников
+        self.employees_list: Optional[list] = None
+        self.employees_club: Optional[str] = None
+        self.merge_employee_indices: Optional[list] = None
+        
         # Для предпросмотра данных
         self.preview_date: Optional[str] = None
         self.preview_duplicates: Optional[list] = None
@@ -1062,6 +1067,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка режима удаления самозанятого
     if state.mode == 'awaiting_self_employed_remove':
         await handle_self_employed_remove(update, state, text)
+        return
+    
+    # Обработка ввода номеров для объединения сотрудников
+    if state.mode == 'awaiting_merge_employees':
+        await handle_merge_employees_input(update, state, text)
+        return
+    
+    # Обработка подтверждения объединения сотрудников
+    if state.mode == 'awaiting_merge_employees_confirm':
+        # Обрабатывается через inline кнопки, текст игнорируем
+        await update.message.reply_text("Используйте кнопки выше для подтверждения")
         return
     
     # Команда "экспорт"
@@ -3501,13 +3517,22 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         temp_file.write(''.join(lines))
         temp_file.close()
         
-        # Отправляем файл
+        # Отправляем файл с кнопкой объединения
+        merge_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 ОБЪЕДИНИТЬ", callback_data=f'merge_employees_{club.lower()}')]
+        ])
+        
         with open(temp_file.name, 'rb') as f:
             await query.message.reply_document(
                 document=f,
                 filename=f"sotrudniki_{club.lower()}.txt",
-                caption=f"👥 Список сотрудников клуба {club}\nВсего: {len(employees_sorted)}"
+                caption=f"👥 Список сотрудников клуба {club}\nВсего: {len(employees_sorted)}",
+                reply_markup=merge_keyboard
             )
+        
+        # Сохраняем список сотрудников в state для дальнейшего использования
+        state.employees_list = employees_sorted
+        state.employees_club = club
         
         # Удаляем временный файл
         import os
@@ -3605,6 +3630,45 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif query.data == 'delete_mass_confirm_no':
         await query.edit_message_reply_markup(None)
         await handle_delete_mass_confirm_message(query.message, state, False)
+    
+    # Объединение сотрудников
+    elif query.data.startswith('merge_employees_'):
+        club = query.data.replace('merge_employees_', '').capitalize()
+        if club == 'Moskvich':
+            club = 'Москвич'
+        
+        await query.edit_message_text(
+            "🔗 ОБЪЕДИНЕНИЕ СОТРУДНИКОВ\n\n"
+            "Введите номера сотрудников для объединения через тире или запятую\n\n"
+            "📝 Примеры:\n"
+            "• 1-5 (объединить 1 и 5)\n"
+            "• 3-7-30 (объединить 3, 7 и 30)\n"
+            "• 2,4,6 (объединить 2, 4 и 6)\n\n"
+            "⚠️ Первый в списке станет главным"
+        )
+        state.mode = 'awaiting_merge_employees'
+    
+    # Подтверждение объединения сотрудников
+    elif query.data == 'merge_employees_confirm':
+        await query.edit_message_reply_markup(None)
+        await handle_merge_employees_confirm(query.message, state)
+    
+    elif query.data == 'merge_employees_edit':
+        await query.edit_message_text(
+            "🔗 ОБЪЕДИНЕНИЕ СОТРУДНИКОВ\n\n"
+            "Введите номера сотрудников для объединения через тире или запятую\n\n"
+            "📝 Примеры:\n"
+            "• 1-5 (объединить 1 и 5)\n"
+            "• 3-7-30 (объединить 3, 7 и 30)\n"
+            "• 2,4,6 (объединить 2, 4 и 6)\n\n"
+            "⚠️ Первый в списке станет главным"
+        )
+        state.mode = 'awaiting_merge_employees'
+    
+    elif query.data == 'merge_employees_cancel':
+        await query.edit_message_text("❌ Объединение отменено")
+        state.mode = None
+        state.merge_employee_indices = None
     
     # Управление самозанятыми
     elif query.data == 'self_employed_add':
@@ -3725,6 +3789,110 @@ def format_report_summary(totals: Dict, club_name: str, period: str,
     lines.append("\n📄 Детальный отчёт в Excel файле ⬇️")
     
     return '\n'.join(lines)
+
+
+async def handle_merge_employees_input(update: Update, state: UserState, text: str):
+    """Обработка ввода номеров сотрудников для объединения"""
+    if not state.employees_list:
+        await update.message.reply_text("❌ Ошибка: список сотрудников не найден")
+        state.mode = None
+        return
+    
+    # Парсим номера (поддержка тире и запятых)
+    text_normalized = text.replace(',', '-').replace(' ', '')
+    parts = text_normalized.split('-')
+    
+    try:
+        indices = [int(p) for p in parts if p.isdigit()]
+    except:
+        await update.message.reply_text("❌ Неверный формат. Используйте номера через тире или запятую\nПример: 1-5-8")
+        return
+    
+    # Проверки
+    if len(indices) < 2:
+        await update.message.reply_text("❌ Нужно минимум 2 сотрудника для объединения")
+        return
+    
+    if len(set(indices)) != len(indices):
+        await update.message.reply_text("❌ Номера не должны повторяться")
+        return
+    
+    max_index = len(state.employees_list)
+    invalid = [i for i in indices if i < 1 or i > max_index]
+    if invalid:
+        await update.message.reply_text(f"❌ Неверные номера: {invalid}\nДоступны номера от 1 до {max_index}")
+        return
+    
+    # Получаем сотрудников по индексам (индексы с 1, в массиве с 0)
+    selected_employees = [state.employees_list[i-1] for i in indices]
+    main_employee = selected_employees[0]
+    
+    # Формируем предпросмотр
+    lines = ["📋 ОБЪЕДИНЕНИЕ СОТРУДНИКОВ\n"]
+    lines.append(f"🏢 Клуб: {state.employees_club}\n")
+    lines.append("Будут объединены:\n")
+    
+    for i, emp in enumerate(selected_employees):
+        prefix = "← ГЛАВНЫЙ" if i == 0 else ""
+        lines.append(f"{indices[i]}. {emp['code']} - {emp['name']} {prefix}\n")
+    
+    lines.append(f"\n⚠️ В БД все записи этих сотрудников получат:")
+    lines.append(f"   КОД: {main_employee['code']}")
+    lines.append(f"   ИМЯ: {main_employee['name']}\n")
+    lines.append("✅ Это НАВСЕГДА изменит данные в БД!")
+    
+    # Сохраняем выбор
+    state.merge_employee_indices = indices
+    state.mode = 'awaiting_merge_employees_confirm'
+    
+    # Кнопки подтверждения
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ ОК - ОБЪЕДИНИТЬ", callback_data='merge_employees_confirm')],
+        [InlineKeyboardButton("✏️ РЕДАКТИРОВАТЬ", callback_data='merge_employees_edit')],
+        [InlineKeyboardButton("❌ ОТМЕНА", callback_data='merge_employees_cancel')]
+    ])
+    
+    await update.message.reply_text(''.join(lines), reply_markup=keyboard)
+
+
+async def handle_merge_employees_confirm(message, state: UserState):
+    """Выполнение объединения сотрудников в БД"""
+    if not state.merge_employee_indices or not state.employees_list:
+        await message.reply_text("❌ Ошибка: данные не найдены")
+        state.mode = None
+        return
+    
+    # Получаем сотрудников
+    selected_employees = [state.employees_list[i-1] for i in state.merge_employee_indices]
+    main_employee = selected_employees[0]
+    
+    # Объединяем в БД
+    updated_count = db.merge_employees(
+        club=state.employees_club,
+        main_code=main_employee['code'],
+        main_name=main_employee['name'],
+        employees_to_merge=selected_employees[1:]  # Все кроме главного
+    )
+    
+    # Формируем отчёт
+    lines = ["✅ ОБЪЕДИНЕНИЕ ВЫПОЛНЕНО!\n"]
+    lines.append(f"🏢 Клуб: {state.employees_club}\n")
+    lines.append("Объединены:\n")
+    
+    for i, emp in enumerate(selected_employees[1:], 1):
+        lines.append(f"• {emp['code']} - {emp['name']} → {main_employee['code']} - {main_employee['name']}\n")
+    
+    lines.append(f"\n📊 Обновлено записей в БД: {updated_count}")
+    lines.append("\n\n✅ Теперь в отчётах эти сотрудники будут показываться как:")
+    lines.append(f"   {main_employee['code']} - {main_employee['name']}")
+    
+    await message.reply_text(''.join(lines))
+    
+    # Очищаем состояние
+    state.mode = None
+    state.merge_employee_indices = None
+    state.employees_list = None
+    state.employees_club = None
 
 
 async def handle_self_employed_command(update: Update, context: ContextTypes.DEFAULT_TYPE,

@@ -607,4 +607,42 @@ class Database:
             print(f"Ошибка получения сотрудников: {e}")
             conn.close()
             return []
+    
+    def merge_employees(self, club: str, main_code: str, main_name: str, employees_to_merge: List[Dict]) -> int:
+        """
+        Объединить сотрудников в БД - все записи получат код и имя главного сотрудника
+        
+        Args:
+            club: название клуба
+            main_code: код главного сотрудника
+            main_name: имя главного сотрудника
+            employees_to_merge: список сотрудников для объединения (словари с code, name)
+        
+        Returns:
+            Количество обновлённых записей
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        total_updated = 0
+        
+        try:
+            for emp in employees_to_merge:
+                # Обновляем все записи этого сотрудника
+                cursor.execute("""
+                    UPDATE operations
+                    SET code = ?, name_snapshot = ?
+                    WHERE club = ? AND code = ? AND name_snapshot = ?
+                """, (main_code, main_name, club, emp['code'], emp['name']))
+                
+                total_updated += cursor.rowcount
+            
+            conn.commit()
+            conn.close()
+            return total_updated
+        except Exception as e:
+            print(f"Ошибка объединения сотрудников: {e}")
+            conn.rollback()
+            conn.close()
+            return 0
 
