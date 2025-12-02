@@ -2197,10 +2197,78 @@ def find_code_duplicates(operations: list) -> list:
 
 
 def name_similarity(name1: str, name2: str) -> float:
-    """Вычисление похожести двух имен (0.0 - 1.0)"""
+    """
+    Вычисление похожести двух имен с приоритетом фамилии (0.0 - 1.0)
+    Фамилия (последнее слово) имеет вес 70%, имя - 30%
+    """
     if not name1 or not name2:
         return 0.0
-    return SequenceMatcher(None, name1.lower().strip(), name2.lower().strip()).ratio()
+    
+    name1_clean = name1.lower().strip()
+    name2_clean = name2.lower().strip()
+    
+    # Разбиваем на части
+    parts1 = name1_clean.split()
+    parts2 = name2_clean.split()
+    
+    if not parts1 or not parts2:
+        return 0.0
+    
+    # Если одно из имен содержит только одно слово - обычное сравнение
+    if len(parts1) == 1 or len(parts2) == 1:
+        return SequenceMatcher(None, name1_clean, name2_clean).ratio()
+    
+    # Извлекаем фамилию (последнее слово) и имя (остальное)
+    surname1 = parts1[-1]
+    surname2 = parts2[-1]
+    firstname1 = ' '.join(parts1[:-1])
+    firstname2 = ' '.join(parts2[:-1])
+    
+    # Словарь сокращений имен
+    name_abbreviations = {
+        'дима': 'дмитрий',
+        'дмитр': 'дмитрий',
+        'саша': 'александр',
+        'алекс': 'александр',
+        'лёша': 'алексей',
+        'леша': 'алексей',
+        'макс': 'максим',
+        'максимка': 'максим',
+        'миша': 'михаил',
+        'паша': 'павел',
+        'женя': 'евгений',
+        'вова': 'владимир',
+        'володя': 'владимир',
+        'коля': 'николай',
+        'серёга': 'сергей',
+        'серега': 'сергей',
+        'андрюха': 'андрей',
+        'влад': 'владислав',
+        'юра': 'юрий',
+        'катя': 'екатерина',
+        'настя': 'анастасия',
+        'маша': 'мария',
+        'лена': 'елена',
+        'оля': 'ольга',
+        'таня': 'татьяна',
+        'вика': 'виктория',
+        'даша': 'дарья'
+    }
+    
+    # Нормализуем имена через словарь сокращений
+    firstname1_normalized = name_abbreviations.get(firstname1.lower(), firstname1.lower())
+    firstname2_normalized = name_abbreviations.get(firstname2.lower(), firstname2.lower())
+    
+    # Сравниваем фамилии
+    surname_similarity = SequenceMatcher(None, surname1, surname2).ratio()
+    
+    # Сравниваем имена (с учетом нормализации)
+    firstname_similarity = SequenceMatcher(None, firstname1_normalized, firstname2_normalized).ratio()
+    
+    # Взвешенная сумма: фамилия 70%, имя 30%
+    weighted_similarity = surname_similarity * 0.7 + firstname_similarity * 0.3
+    
+    return weighted_similarity
 
 
 def normalize_name_variants(name: str) -> List[str]:
