@@ -2291,9 +2291,62 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
     if hasattr(state, 'sb_merges_anora') and state.sb_merges_anora:
         combined_sb_merges.update(state.sb_merges_anora)
     
-    # 2. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (уникальные для каждого клуба)
-    # ПРИМЕНЯЕМ объединения СБ сразу при добавлении
+    # 2. Добавляем СБ из каждого клуба с применением объединений ВНУТРИ клуба
+    # Сначала группируем СБ по клубам и применяем их внутренние объединения
+    from collections import defaultdict
+    
+    # Группируем СБ из Москвича
+    sb_moskvich_grouped = defaultdict(lambda: {'nal': 0, 'beznal': 0})
+    for op in ops_m:
+        if op['code'] == 'СБ':
+            name = op['name']
+            # Применяем объединение Москвича
+            if state.sb_merges_moskvich and name in state.sb_merges_moskvich:
+                name = state.sb_merges_moskvich[name]
+            
+            if op['channel'] == 'нал':
+                sb_moskvich_grouped[name]['nal'] += op['amount']
+            else:
+                sb_moskvich_grouped[name]['beznal'] += op['amount']
+    
+    # Группируем СБ из Аноры
+    sb_anora_grouped = defaultdict(lambda: {'nal': 0, 'beznal': 0})
+    for op in ops_a:
+        if op['code'] == 'СБ':
+            name = op['name']
+            # Применяем объединение Аноры
+            if state.sb_merges_anora and name in state.sb_merges_anora:
+                name = state.sb_merges_anora[name]
+            
+            if op['channel'] == 'нал':
+                sb_anora_grouped[name]['nal'] += op['amount']
+            else:
+                sb_anora_grouped[name]['beznal'] += op['amount']
+    
+    # Теперь добавляем СБ из обоих клубов
+    # Сначала те что УЖЕ в sb_cross_club_matches (они уже добавлены выше)
+    # Остальные добавляем отдельно
+    for name, amounts in sb_moskvich_grouped.items():
+        # Проверяем: не был ли этот СБ уже добавлен как часть sb_cross_club_matches
+        if make_processed_key('СБ', name) not in processed:
+            if amounts['nal'] > 0:
+                merged_ops.append({'code': 'СБ', 'name': name, 'channel': 'нал', 'amount': amounts['nal'], 'date': date_from})
+            if amounts['beznal'] > 0:
+                merged_ops.append({'code': 'СБ', 'name': name, 'channel': 'безнал', 'amount': amounts['beznal'], 'date': date_from})
+            processed.add(make_processed_key('СБ', name))
+    
+    for name, amounts in sb_anora_grouped.items():
+        if make_processed_key('СБ', name) not in processed:
+            if amounts['nal'] > 0:
+                merged_ops.append({'code': 'СБ', 'name': name, 'channel': 'нал', 'amount': amounts['nal'], 'date': date_from})
+            if amounts['beznal'] > 0:
+                merged_ops.append({'code': 'СБ', 'name': name, 'channel': 'безнал', 'amount': amounts['beznal'], 'date': date_from})
+            processed.add(make_processed_key('СБ', name))
+    
+    # 3. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (НЕ СБ)
     for op in ops_m + ops_a:
+        if op['code'] != 'СБ' and make_processed_key(op['code'], op['name']) not in processed:
+            merged_ops.append(op)
         code = op['code']
         name = op['name']
         
