@@ -2447,10 +2447,13 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
 
 
 async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                      state: UserState, text: str, text_lower: str):
+                                      state: UserState, text: str, text_lower: str, message=None):
     """Обработка подтверждения объединения СБ с похожими именами"""
+    # Используем message если передан, иначе update.message
+    msg = message if message else update.message
+    
     if not state.sb_merge_data:
-        await update.message.reply_text("❌ Ошибка: данные не найдены")
+        await msg.reply_text("❌ Ошибка: данные не найдены")
         state.mode = None
         return
     
@@ -2465,7 +2468,7 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     parts = normalized_text.split()
     
     if not parts:
-        await update.message.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
+        await msg.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
         return
     
     command = parts[0]
@@ -2477,17 +2480,17 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
             try:
                 indices_to_merge = set(int(x) - 1 for x in parts[1:] if x.isdigit())
             except:
-                await update.message.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
+                await msg.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
                 return
     elif command in ['не', 'net', 'нет']:
         try:
             exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
             indices_to_merge = set(range(len(sb_duplicates))) - exclude_indices
         except:
-            await update.message.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
+            await msg.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
             return
     else:
-        await update.message.reply_text(
+        await msg.reply_text(
             "❌ Неверная команда.\n\n"
             "Используйте:\n"
             "• ок - объединить все\n"
@@ -3063,7 +3066,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await handle_merge_confirmation(update, state, 'ок', message=query.message)
         elif state.mode == 'awaiting_sb_merge_confirm' and state.sb_merge_data:
             await query.edit_message_reply_markup(None)
-            await handle_sb_merge_confirmation(update, context, state, 'ок', 'ок')
+            await handle_sb_merge_confirmation(update, context, state, 'ок', 'ок', message=query.message)
         else:
             await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
     
@@ -3078,7 +3081,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             sb_duplicates = state.sb_merge_data['sb_duplicates']
             all_numbers = ' '.join(str(i+1) for i in range(len(sb_duplicates)))
             await query.edit_message_reply_markup(None)
-            await handle_sb_merge_confirmation(update, context, state, f'не {all_numbers}', f'не {all_numbers}')
+            await handle_sb_merge_confirmation(update, context, state, f'не {all_numbers}', f'не {all_numbers}', message=query.message)
         else:
             await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
     
