@@ -2556,15 +2556,28 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         remaining_clubs = ['Москвич', 'Анора']
         remaining_clubs.remove(processed_club)
         
+        # Используем msg для создания правильного update для дальнейших вызовов
+        # Если msg есть (из callback), создаем новый Update с message из msg
+        if msg and not update.message:
+            # Создаем новый Update объект с message из msg
+            new_update = Update(
+                update_id=update.update_id,
+                message=msg,
+                effective_user=update.effective_user,
+                effective_chat=update.effective_chat
+            )
+        else:
+            new_update = update
+        
         # Обрабатываем оставшийся клуб через generate_and_send_report
         for club in remaining_clubs:
-            await generate_and_send_report(update, club, data['date_from'], data['date_to'], state)
+            await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state)
             # Если установлен режим ожидания - выходим
             if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
                 return
         
         # Если нет дубликатов - генерируем сводный отчет
-        await prepare_merged_report(update, state, data['date_from'], data['date_to'])
+        await prepare_merged_report(new_update, state, data['date_from'], data['date_to'])
         
         # НЕ сбрасываем режим если ждём подтверждения объединения!
         if state.mode != 'awaiting_merge_confirm':
