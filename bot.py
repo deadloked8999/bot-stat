@@ -1967,6 +1967,9 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
         if all_ops:
             report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(all_ops)
             
+            # Определяем куда отправлять
+            msg = update.message if update.message else (update.callback_query.message if update.callback_query else None)
+            
             # Краткая сводка
             summary = format_report_summary(
                 totals, 
@@ -1974,7 +1977,7 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
                 f"{date_from} .. {date_to}",
                 len(report_rows)
             )
-            await update.message.reply_text(summary)
+            await msg.reply_text(summary)
             
             # Экспорт
             filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
@@ -1982,7 +1985,7 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
                 report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename, db
             )
             with open(filename, 'rb') as f:
-                await update.message.reply_document(
+                await msg.reply_document(
                     document=f, filename=filename,
                     caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}"
                 )
@@ -2047,8 +2050,11 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     )
     
     # Отправляем файл и сообщение с кнопками
+    # Определяем куда отправлять (может быть callback query или обычное сообщение)
+    msg = update.message if update.message else (update.callback_query.message if update.callback_query else None)
+    
     with open(temp_file.name, 'rb') as f:
-        await update.message.reply_document(
+        await msg.reply_document(
             document=f,
             filename=f"sovpadeniya_{date_from}_{date_to}.txt",
             caption=short_message,
