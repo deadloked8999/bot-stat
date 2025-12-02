@@ -2283,17 +2283,46 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
             processed.add(make_processed_key('СБ', name_m))
             processed.add(make_processed_key('СБ', name_a))
     
-    # 2. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (уникальные для каждого клуба)
-    for op in ops_m + ops_a:
-        if make_processed_key(op['code'], op['name']) not in processed:
-            merged_ops.append(op)
-    
-    # Объединяем словари СБ из обоих клубов для применения в сводном отчёте
+    # Объединяем словари СБ из обоих клубов
     combined_sb_merges = {}
     if hasattr(state, 'sb_merges_moskvich') and state.sb_merges_moskvich:
         combined_sb_merges.update(state.sb_merges_moskvich)
     if hasattr(state, 'sb_merges_anora') and state.sb_merges_anora:
         combined_sb_merges.update(state.sb_merges_anora)
+    
+    # 2. Добавляем ВСЕ ОСТАЛЬНЫЕ записи (уникальные для каждого клуба)
+    # ПРИМЕНЯЕМ объединения СБ сразу при добавлении
+    for op in ops_m + ops_a:
+        code = op['code']
+        name = op['name']
+        
+        # Применяем объединение имён СБ
+        if combined_sb_merges and code == 'СБ' and name in combined_sb_merges:
+            # Заменяем имя на объединённое, но проверяем не обработано ли уже
+            merged_name = combined_sb_merges[name]
+            if make_processed_key(code, merged_name) not in processed:
+                # Создаём операцию с объединённым именем
+                merged_op = op.copy()
+                merged_op['name'] = merged_name
+                # Проверяем: может уже есть операция с таким же именем и каналом?
+                # Если да - суммируем, если нет - добавляем
+                existing = None
+                for existing_op in merged_ops:
+                    if (existing_op['code'] == code and 
+                        existing_op['name'] == merged_name and 
+                        existing_op['channel'] == op['channel']):
+                        existing = existing_op
+                        break
+                
+                if existing:
+                    existing['amount'] += op['amount']
+                else:
+                    merged_ops.append(merged_op)
+                
+                # Отмечаем оригинальное имя как обработанное
+                processed.add(make_processed_key(code, name))
+        elif make_processed_key(code, name) not in processed:
+            merged_ops.append(op)
     
     # Генерируем СВОДНЫЙ отчет
     if merged_ops:
