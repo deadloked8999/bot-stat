@@ -3238,18 +3238,21 @@ async def restore_sb_names_command(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("🔒 Требуется авторизация")
         return
     
-    await update.message.reply_text("⏳ Восстанавливаю имена СБ из журнала...")
-    
-    restored_count, messages = db.restore_sb_names_from_log()
-    
-    if restored_count > 0:
-        response = [f"✅ Восстановлено записей: {restored_count}\n"]
-        response.extend(messages[:20])  # Показываем первые 20
-        if len(messages) > 20:
-            response.append(f"\n... и ещё {len(messages) - 20} записей")
-        await update.message.reply_text('\n'.join(response))
-    else:
-        await update.message.reply_text("ℹ️ Записей для восстановления не найдено")
+    try:
+        await update.message.reply_text("⏳ Восстанавливаю имена СБ из журнала...")
+        
+        restored_count, messages = db.restore_sb_names_from_log()
+        
+        if restored_count > 0:
+            response = [f"✅ Восстановлено записей: {restored_count}\n"]
+            response.extend(messages[:20])  # Показываем первые 20
+            if len(messages) > 20:
+                response.append(f"\n... и ещё {len(messages) - 20} записей")
+            await update.message.reply_text('\n'.join(response))
+        else:
+            await update.message.reply_text("ℹ️ Записей для восстановления не найдено")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при восстановлении: {str(e)}")
 
 
 async def handle_journal_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
