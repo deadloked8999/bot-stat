@@ -4,6 +4,7 @@
 import os
 import re
 import uuid
+import tempfile
 from datetime import datetime
 from typing import Dict, Optional, Tuple, List
 from openpyxl import Workbook
@@ -218,6 +219,18 @@ def get_self_employed_action_keyboard():
             InlineKeyboardButton("➖ Удалить код", callback_data='self_employed_remove')
         ],
         [InlineKeyboardButton("❌ Закрыть", callback_data='self_employed_close')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_merge_confirmation_keyboard():
+    """Клавиатура для подтверждения объединения совпадений"""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Объединить все", callback_data='merge_all'),
+            InlineKeyboardButton("❌ Не объединять", callback_data='merge_none')
+        ],
+        [InlineKeyboardButton("📄 Показать список", callback_data='merge_show_list')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -1899,26 +1912,55 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
         state.report_club = None
         return
     
-    # Показываем список для подтверждения
-    response = ["📋 Найдены совпадения для объединения:\n"]
+    # Создаем текстовый файл со списком совпадений
+    file_content = ["📋 НАЙДЕНЫ СОВПАДЕНИЯ ДЛЯ ОБЪЕДИНЕНИЯ\n"]
+    file_content.append(f"Период: {date_from} .. {date_to}\n")
+    file_content.append("=" * 50 + "\n\n")
     
     for i, candidate in enumerate(merge_candidates, 1):
-        response.append(f"{i}. {candidate['name']} {candidate['code']}")
-        response.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}")
-        response.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}")
-        response.append("")
+        file_content.append(f"{i}. {candidate['name']} {candidate['code']}\n")
+        file_content.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}\n")
+        file_content.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}\n")
+        file_content.append("\n")
     
-    response.append("─" * 35)
-    response.append("\n🔄 ОБЪЕДИНЕНИЕ ДЛЯ СВОДНОГО ОТЧЁТА:\n")
-    response.append("• ОК → объединить все")
-    response.append("• ОК 1 → объединить только пункт 1")
-    response.append("• ОК 1 2 → объединить пункты 1 и 2")
-    response.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)")
-    response.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2")
-    response.append("\nℹ️ Примечание: объединение ТОЛЬКО для отчёта")
-    response.append("(данные в БД не изменяются)")
+    file_content.append("=" * 50 + "\n")
+    file_content.append("\n🔄 ОБЪЕДИНЕНИЕ ДЛЯ СВОДНОГО ОТЧЁТА:\n")
+    file_content.append("• ОК → объединить все\n")
+    file_content.append("• ОК 1 → объединить только пункт 1\n")
+    file_content.append("• ОК 1 2 → объединить пункты 1 и 2\n")
+    file_content.append("• НЕ 1 → НЕ объединять пункт 1 (остальные да)\n")
+    file_content.append("• НЕ 1 2 → НЕ объединять пункты 1 и 2\n")
+    file_content.append("\nℹ️ Примечание: объединение ТОЛЬКО для отчёта\n")
+    file_content.append("(данные в БД не изменяются)\n")
     
-    await update.message.reply_text('\n'.join(response))
+    # Сохраняем во временный файл
+    temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
+    temp_file.write(''.join(file_content))
+    temp_file.close()
+    
+    # Отправляем короткое сообщение с кнопками
+    count = len(merge_candidates)
+    short_message = (
+        f"📋 Найдено совпадений: {count}\n\n"
+        f"🔄 Объединение для сводного отчёта:\n"
+        f"• Используйте кнопки ниже\n"
+        f"• Или введите: ОК / ОК 1 / НЕ 1\n\n"
+        f"📄 Детальный список в файле ⬇️\n\n"
+        f"ℹ️ Объединение ТОЛЬКО для отчёта\n"
+        f"(данные в БД не изменяются)"
+    )
+    
+    # Отправляем файл и сообщение с кнопками
+    with open(temp_file.name, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=f"sovpadeniya_{date_from}_{date_to}.txt",
+            caption=short_message,
+            reply_markup=get_merge_confirmation_keyboard()
+        )
+    
+    # Удаляем временный файл
+    os.remove(temp_file.name)
     
     # Сохраняем кандидатов
     state.merge_candidates = merge_candidates
@@ -1926,8 +1968,10 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
     state.mode = 'awaiting_merge_confirm'
 
 
-async def handle_merge_confirmation(update: Update, state: UserState, choice: str):
+async def handle_merge_confirmation(update: Update, state: UserState, choice: str, message=None):
     """Обработка подтверждения объединения для сводного отчёта"""
+    # Используем message если передан, иначе update.message
+    msg = message if message else update.message
     
     # Обработка ответа с новой логикой
     indices_to_merge = set()
@@ -1937,7 +1981,7 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
     parts = normalized_text.split()
     
     if not parts:
-        await update.message.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
+        await msg.reply_text("❌ Неверный формат. Используйте: ок, ок 1, ок 1 2, не 1, не 1 2")
         return
     
     command = parts[0]
@@ -1951,7 +1995,7 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
             try:
                 indices_to_merge = set(int(x) - 1 for x in parts[1:] if x.isdigit())
             except:
-                await update.message.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
+                await msg.reply_text("❌ Неверный формат номеров. Используйте: ок 1 2")
                 return
     elif command in ['не', 'net', 'нет']:
         # "не 1 2" -> НЕ объединять указанные (объединить остальные)
@@ -1959,10 +2003,10 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
             exclude_indices = set(int(x) - 1 for x in parts[1:] if x.isdigit())
             indices_to_merge = set(range(len(state.merge_candidates))) - exclude_indices
         except:
-            await update.message.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
+            await msg.reply_text("❌ Неверный формат номеров. Используйте: не 1 2")
             return
     else:
-        await update.message.reply_text(
+        await msg.reply_text(
             "❌ Неверная команда.\n\n"
             "Используйте:\n"
             "• ок - объединить все\n"
@@ -1978,13 +2022,13 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
     
     # Уведомление о начале генерации
     merged_count = len(indices_to_merge)
-    await update.message.reply_text(
+    await msg.reply_text(
         f"⏳ Генерация сводного отчёта...\n"
         f"Объединяется: {merged_count} из {len(state.merge_candidates)}"
     )
     
-    # Генерируем сводный отчет
-    await generate_merged_report(update, state, excluded)
+    # Генерируем сводный отчет (используем message если передан)
+    await generate_merged_report(update, state, excluded, message)
     
     # Очищаем
     state.mode = None
@@ -1993,8 +2037,11 @@ async def handle_merge_confirmation(update: Update, state: UserState, choice: st
     state.merge_period = None
 
 
-async def generate_merged_report(update: Update, state: UserState, excluded: set):
+async def generate_merged_report(update: Update, state: UserState, excluded: set, message=None):
     """Генерация сводного отчета из ОБОИХ клубов"""
+    # Используем message если передан, иначе update.message
+    msg = message if message else update.message
+    
     try:
         date_from, date_to = state.merge_period
         
@@ -2002,7 +2049,7 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
         ops_m = db.get_operations_by_period('Москвич', date_from, date_to)
         ops_a = db.get_operations_by_period('Анора', date_from, date_to)
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка получения данных: {str(e)}")
+        await msg.reply_text(f"❌ Ошибка получения данных: {str(e)}")
         return
     
     # Создаём объединённый список операций для СВОДНОГО отчёта
@@ -2083,9 +2130,9 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                 len(report_rows),
                 merged_count
             )
-            await update.message.reply_text(summary)
+            await msg.reply_text(summary)
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка генерации отчёта: {str(e)}")
+            await msg.reply_text(f"❌ Ошибка генерации отчёта: {str(e)}")
             return
         
         # Экспорт сводного
@@ -2095,15 +2142,15 @@ async def generate_merged_report(update: Update, state: UserState, excluded: set
                 report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename, db
             )
             with open(filename, 'rb') as f:
-                await update.message.reply_document(
+                await msg.reply_document(
                     document=f, filename=filename,
                     caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}"
                 )
             os.remove(filename)
         except Exception as e:
-            await update.message.reply_text(f"⚠️ Ошибка создания Excel: {str(e)}")
+            await msg.reply_text(f"⚠️ Ошибка создания Excel: {str(e)}")
     else:
-        await update.message.reply_text("ℹ️ Нет данных для сводного отчета")
+        await msg.reply_text("ℹ️ Нет данных для сводного отчета")
 
 
 def find_code_duplicates(operations: list) -> list:
@@ -2645,6 +2692,44 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif query.data == 'self_employed_close':
         await query.edit_message_text("✅ Закрыто")
         state.mode = None
+    
+    # Обработка объединения совпадений
+    elif query.data == 'merge_all':
+        if state.mode != 'awaiting_merge_confirm' or not state.merge_candidates:
+            await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
+            return
+        await query.edit_message_reply_markup(None)
+        await handle_merge_confirmation(update, state, 'ок', message=query.message)
+    
+    elif query.data == 'merge_none':
+        if state.mode != 'awaiting_merge_confirm' or not state.merge_candidates:
+            await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
+            return
+        # Формируем команду "не" со всеми номерами
+        all_numbers = ' '.join(str(i+1) for i in range(len(state.merge_candidates)))
+        await query.edit_message_reply_markup(None)
+        await handle_merge_confirmation(update, state, f'не {all_numbers}', message=query.message)
+    
+    elif query.data == 'merge_show_list':
+        if state.mode != 'awaiting_merge_confirm' or not state.merge_candidates:
+            await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
+            return
+        # Показываем список частями (по 15 записей)
+        await query.answer("📄 Отправляю список...")
+        candidates = state.merge_candidates
+        chunk_size = 15
+        
+        for chunk_start in range(0, len(candidates), chunk_size):
+            chunk = candidates[chunk_start:chunk_start + chunk_size]
+            response = [f"📋 Совпадения ({chunk_start + 1}-{min(chunk_start + chunk_size, len(candidates))} из {len(candidates)}):\n"]
+            
+            for i, candidate in enumerate(chunk, chunk_start + 1):
+                response.append(f"{i}. {candidate['name']} {candidate['code']}")
+                response.append(f"   • Москвич: НАЛ {candidate['moskvich']['nal']:.0f}, БЕЗНАЛ {candidate['moskvich']['beznal']:.0f}")
+                response.append(f"   • Анора: НАЛ {candidate['anora']['nal']:.0f}, БЕЗНАЛ {candidate['anora']['beznal']:.0f}")
+                response.append("")
+            
+            await query.message.reply_text('\n'.join(response))
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
