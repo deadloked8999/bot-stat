@@ -1,7 +1,7 @@
 """
 Модуль генерации отчетов
 """
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 import csv
 from io import StringIO
@@ -13,9 +13,10 @@ class ReportGenerator:
     """Генератор отчетов"""
     
     @staticmethod
-    def calculate_report(operations: List[Dict]) -> Tuple[List[Dict], Dict, Dict, bool]:
+    def calculate_report(operations: List[Dict], sb_name_merges: Optional[Dict[str, str]] = None) -> Tuple[List[Dict], Dict, Dict, bool]:
         """
         Расчет отчета по операциям
+        sb_name_merges: словарь для объединения имен СБ {старое_имя: новое_имя}
         Возвращает: (строки_отчета, итоги_по_строкам, итоги_пересчет, проверка_ок)
         """
         # Группируем по сотрудникам (код)
@@ -34,6 +35,10 @@ class ReportGenerator:
             name = op['name']
             channel = op['channel']
             amount = op['amount']
+            
+            # Применяем объединение имен СБ (только для отчета)
+            if sb_name_merges and code == 'СБ' and name in sb_name_merges:
+                name = sb_name_merges[name]
             
             employee_data[code]['names'].add(name)
             
