@@ -95,6 +95,10 @@ class UserState:
         # Для объединения СБ с похожими именами
         self.sb_merge_data: Optional[dict] = None
         
+        # Сохранённые объединения СБ для каждого клуба (для сводного отчёта)
+        self.sb_merges_moskvich: Optional[dict] = None
+        self.sb_merges_anora: Optional[dict] = None
+        
         # Для предпросмотра данных
         self.preview_date: Optional[str] = None
         self.preview_duplicates: Optional[list] = None
@@ -2284,10 +2288,20 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
         if make_processed_key(op['code'], op['name']) not in processed:
             merged_ops.append(op)
     
+    # Объединяем словари СБ из обоих клубов для применения в сводном отчёте
+    combined_sb_merges = {}
+    if hasattr(state, 'sb_merges_moskvich') and state.sb_merges_moskvich:
+        combined_sb_merges.update(state.sb_merges_moskvich)
+    if hasattr(state, 'sb_merges_anora') and state.sb_merges_anora:
+        combined_sb_merges.update(state.sb_merges_anora)
+    
     # Генерируем СВОДНЫЙ отчет
     if merged_ops:
         try:
-            report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(merged_ops)
+            report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+                merged_ops,
+                sb_name_merges=combined_sb_merges if combined_sb_merges else None
+            )
             
             # Краткая сводка вместо полного отчёта
             merged_regular = len(state.merge_candidates) - len(excluded_regular) if state.merge_candidates else 0
@@ -2917,6 +2931,13 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         )
     
     os.remove(filename)
+    
+    # СОХРАНЯЕМ словарь объединений СБ в state для сводного отчёта
+    if sb_name_merges:
+        if data['club'] == 'Москвич':
+            state.sb_merges_moskvich = sb_name_merges
+        elif data['club'] == 'Анора':
+            state.sb_merges_anora = sb_name_merges
     
     # Проверяем, был ли выбран "оба" клуба - если да, продолжаем обработку
     if state.report_club == 'оба':
