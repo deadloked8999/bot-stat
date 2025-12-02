@@ -3517,22 +3517,29 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         temp_file.write(''.join(lines))
         temp_file.close()
         
-        # Отправляем файл с кнопкой объединения
-        merge_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 ОБЪЕДИНИТЬ", callback_data=f'merge_employees_{club.lower()}')]
-        ])
-        
+        # Отправляем файл
         with open(temp_file.name, 'rb') as f:
             await query.message.reply_document(
                 document=f,
                 filename=f"sotrudniki_{club.lower()}.txt",
-                caption=f"👥 Список сотрудников клуба {club}\nВсего: {len(employees_sorted)}",
-                reply_markup=merge_keyboard
+                caption=f"👥 Список сотрудников клуба {club}\nВсего: {len(employees_sorted)}"
             )
+        
+        # Инструкция по объединению
+        await query.message.reply_text(
+            "🔗 Для объединения сотрудников:\n\n"
+            "Отправьте номера через тире или запятую\n\n"
+            "📝 Примеры:\n"
+            "• 1-5 (объединить 1 и 5)\n"
+            "• 3-7-30 (объединить 3, 7 и 30)\n"
+            "• 2,4,6 (объединить 2, 4 и 6)\n\n"
+            "⚠️ Первый в списке станет главным"
+        )
         
         # Сохраняем список сотрудников в state для дальнейшего использования
         state.employees_list = employees_sorted
         state.employees_club = club
+        state.mode = 'awaiting_merge_employees'
         
         # Удаляем временный файл
         import os
@@ -3631,23 +3638,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_reply_markup(None)
         await handle_delete_mass_confirm_message(query.message, state, False)
     
-    # Объединение сотрудников
-    elif query.data.startswith('merge_employees_'):
-        club = query.data.replace('merge_employees_', '').capitalize()
-        if club == 'Moskvich':
-            club = 'Москвич'
-        
-        await query.edit_message_text(
-            "🔗 ОБЪЕДИНЕНИЕ СОТРУДНИКОВ\n\n"
-            "Введите номера сотрудников для объединения через тире или запятую\n\n"
-            "📝 Примеры:\n"
-            "• 1-5 (объединить 1 и 5)\n"
-            "• 3-7-30 (объединить 3, 7 и 30)\n"
-            "• 2,4,6 (объединить 2, 4 и 6)\n\n"
-            "⚠️ Первый в списке станет главным"
-        )
-        state.mode = 'awaiting_merge_employees'
-    
     # Подтверждение объединения сотрудников
     elif query.data == 'merge_employees_confirm':
         await query.edit_message_reply_markup(None)
@@ -3655,15 +3645,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'merge_employees_edit':
         await query.edit_message_text(
-            "🔗 ОБЪЕДИНЕНИЕ СОТРУДНИКОВ\n\n"
-            "Введите номера сотрудников для объединения через тире или запятую\n\n"
-            "📝 Примеры:\n"
-            "• 1-5 (объединить 1 и 5)\n"
-            "• 3-7-30 (объединить 3, 7 и 30)\n"
-            "• 2,4,6 (объединить 2, 4 и 6)\n\n"
-            "⚠️ Первый в списке станет главным"
+            "✏️ Введите номера заново\n\n"
+            "📝 Примеры: 1-5, 3-7-30, 2,4,6"
         )
         state.mode = 'awaiting_merge_employees'
+        state.merge_employee_indices = None
     
     elif query.data == 'merge_employees_cancel':
         await query.edit_message_text("❌ Объединение отменено")
@@ -3845,9 +3831,9 @@ async def handle_merge_employees_input(update: Update, state: UserState, text: s
     state.merge_employee_indices = indices
     state.mode = 'awaiting_merge_employees_confirm'
     
-    # Кнопки подтверждения
+    # Кнопка объединения
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ ОК - ОБЪЕДИНИТЬ", callback_data='merge_employees_confirm')],
+        [InlineKeyboardButton("🔗 ОБЪЕДИНИТЬ", callback_data='merge_employees_confirm')],
         [InlineKeyboardButton("✏️ РЕДАКТИРОВАТЬ", callback_data='merge_employees_edit')],
         [InlineKeyboardButton("❌ ОТМЕНА", callback_data='merge_employees_cancel')]
     ])
