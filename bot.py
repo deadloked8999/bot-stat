@@ -2233,6 +2233,7 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
     
     # 1.5. Добавляем ОБЪЕДИНЁННЫЕ СБ между клубами
     sb_matches = getattr(state, 'sb_cross_club_matches', [])
+    await msg.reply_text(f"🔍 DEBUG: sb_cross_club_matches содержит {len(sb_matches)} пар СБ")
     for i, match in enumerate(sb_matches):
         sb_idx = len(state.merge_candidates) + i  # Индекс в общем списке
         name_m = match['name_moskvich']
