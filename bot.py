@@ -2347,47 +2347,19 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
     for op in ops_m + ops_a:
         if op['code'] != 'СБ' and make_processed_key(op['code'], op['name']) not in processed:
             merged_ops.append(op)
-        code = op['code']
-        name = op['name']
-        
-        # Применяем объединение имён СБ
-        if combined_sb_merges and code == 'СБ' and name in combined_sb_merges:
-            # Заменяем имя на объединённое, но проверяем не обработано ли уже
-            merged_name = combined_sb_merges[name]
-            if make_processed_key(code, merged_name) not in processed:
-                # Создаём операцию с объединённым именем
-                merged_op = op.copy()
-                merged_op['name'] = merged_name
-                # Проверяем: может уже есть операция с таким же именем и каналом?
-                # Если да - суммируем, если нет - добавляем
-                existing = None
-                for existing_op in merged_ops:
-                    if (existing_op['code'] == code and 
-                        existing_op['name'] == merged_name and 
-                        existing_op['channel'] == op['channel']):
-                        existing = existing_op
-                        break
-                
-                if existing:
-                    existing['amount'] += op['amount']
-                else:
-                    merged_ops.append(merged_op)
-                
-                # Отмечаем оригинальное имя как обработанное
-                processed.add(make_processed_key(code, name))
-        elif make_processed_key(code, name) not in processed:
-            merged_ops.append(op)
     
     # ОТЛАДКА: Проверяем сколько СБ в merged_ops
     sb_count_in_merged = len([op for op in merged_ops if op['code'] == 'СБ'])
-    await msg.reply_text(f"🔍 DEBUG: В merged_ops СБ операций: {sb_count_in_merged}")
+    unique_sb_names = set([op['name'] for op in merged_ops if op['code'] == 'СБ'])
+    await msg.reply_text(f"🔍 DEBUG: В merged_ops СБ операций: {sb_count_in_merged}, уникальных имён: {len(unique_sb_names)}")
     
     # Генерируем СВОДНЫЙ отчет
+    # ДЛЯ СВОДНОГО НЕ передаём sb_name_merges, т.к. уже применили выше!
     if merged_ops:
         try:
             report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
                 merged_ops,
-                sb_name_merges=combined_sb_merges if combined_sb_merges else None
+                sb_name_merges=None  # УЖЕ применили объединения!
             )
             
             # ОТЛАДКА: Проверяем сколько СБ в report_rows
