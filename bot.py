@@ -63,6 +63,7 @@ class UserState:
         
         # Для команды отчет
         self.report_club: Optional[str] = None
+        self.pending_report_period: Optional[tuple] = None  # Для хранения периода при обработке "оба"
         
         # Для команды исправить
         self.edit_code: Optional[str] = None
@@ -870,10 +871,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Инициализируем отслеживание обработанных клубов
             state.processed_clubs_for_report = set()
             
+            # Сохраняем период для дальнейшего использования
+            state.pending_report_period = (date_from, date_to)
+            
             # Сначала отчеты по каждому клубу
             for club in ['Москвич', 'Анора']:
                 await generate_and_send_report(update, club, date_from, date_to, state)
                 # Если generate_and_send_report установил режим awaiting_duplicate_confirm или awaiting_sb_merge_confirm - выходим
+                # НО НЕ ПРЕРЫВАЕМ ВЕСЬ ПРОЦЕСС! Ждём подтверждения пользователя
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
                     return
             
@@ -884,6 +889,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if state.mode != 'awaiting_merge_confirm':
                 state.mode = None
                 state.report_club = None
+                state.pending_report_period = None
         else:
             club = 'Москвич' if state.report_club == 'москвич' else 'Анора'
             await generate_and_send_report(update, club, date_from, date_to, state)
@@ -2759,22 +2765,20 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
         if remaining_clubs:
             for club in remaining_clubs:
                 await generate_and_send_report(update, club, data['date_from'], data['date_to'], state, check_duplicates=True)
-                # Если установлен режим ожидания - НЕ выходим, а продолжим после обработки
+                # Если установлен режим ожидания - прерываем цикл и ждём подтверждения
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
-                    break
+                    return
         
         # Если ВСЕ клубы обработаны И нет активных режимов ожидания - генерируем сводный отчет
         if len(state.processed_clubs_for_report) == 2 and state.mode not in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
             await prepare_merged_report(update, state, data['date_from'], data['date_to'])
             
-            # Очищаем состояние после завершения
-            state.mode = None
-            state.report_club = None
-            state.processed_clubs_for_report = set()
-            
             # НЕ сбрасываем режим если ждём подтверждения объединения!
-            if state.mode == 'awaiting_merge_confirm':
-                return
+            if state.mode != 'awaiting_merge_confirm':
+                state.mode = None
+                state.report_club = None
+                state.processed_clubs_for_report = set()
+                state.pending_report_period = None
     else:
         # Очищаем состояние
         state.mode = None
@@ -2909,46 +2913,33 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         processed_club = data['club']
         state.processed_clubs_for_report.add(processed_club)
         
-        
         # Определяем оставшиеся клубы
         all_clubs = {'Москвич', 'Анора'}
         remaining_clubs = all_clubs - state.processed_clubs_for_report
         
-        
         # Если есть необработанные клубы - обрабатываем
         if remaining_clubs:
-            # Используем msg для создания правильного update для дальнейших вызовов
-            # Если msg есть (из callback), просто используем исходный update
-            # Он уже содержит всю нужную информацию
             new_update = update
             
             # Обрабатываем оставшийся клуб через generate_and_send_report
             for club in remaining_clubs:
                 await generate_and_send_report(new_update, club, data['date_from'], data['date_to'], state, check_duplicates=True, message=msg)
                 # Если установлен режим ожидания - выходим
-                # После обработки дубликатов, эта функция вызовется СНОВА для того же клуба
                 if state.mode in ['awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm']:
                     return
-            
-        
         
         # Проверяем - все ли клубы обработаны?
-        # Этот блок выполнится ПОСЛЕ того как пользователь обработает дубликаты второго клуба
-        # ИЛИ сразу после обработки второго клуба если у него не было дубликатов
         if len(state.processed_clubs_for_report) == 2:
-            # Просто используем исходный update
             new_update = update
             
             await prepare_merged_report(new_update, state, data['date_from'], data['date_to'])
             
-            # Очищаем состояние после завершения
-            state.mode = None
-            state.report_club = None
-            state.processed_clubs_for_report = set()
-            
             # НЕ сбрасываем режим если ждём подтверждения объединения!
-            if state.mode == 'awaiting_merge_confirm':
-                return
+            if state.mode != 'awaiting_merge_confirm':
+                state.mode = None
+                state.report_club = None
+                state.processed_clubs_for_report = set()
+                state.pending_report_period = None
     else:
         # Очищаем состояние
         state.mode = None
@@ -3158,8 +3149,6 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
         if not hasattr(state, 'processed_clubs_for_report'):
             state.processed_clubs_for_report = set()
         state.processed_clubs_for_report.add(club)
-        # ОТЛАДКА
-        await update.message.reply_text(f"🔍 DEBUG [generate_and_send_report]: КОНЕЦ для {club}. Всего: {state.processed_clubs_for_report}")
 
 
 async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
