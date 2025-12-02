@@ -2302,9 +2302,80 @@ def normalize_name_variants(name: str) -> List[str]:
     return list(variants)
 
 
+def extract_surname_candidates(name: str) -> set:
+    """
+    Извлечение возможных вариантов фамилии из имени
+    Возвращает set из возможных фамилий (учитывает разный порядок слов)
+    """
+    if not name:
+        return set()
+    
+    parts = name.strip().split()
+    if len(parts) == 0:
+        return set()
+    
+    # Словарь популярных имен (не фамилий) - расширенный
+    common_first_names = {
+        'дима', 'дмитрий', 'дмитр', 'димон', 'митя',
+        'александр', 'саша', 'алекс', 'сан', 'шура',
+        'максим', 'макс', 'максимка',
+        'иван', 'ваня', 'ванька',
+        'петр', 'петя', 'пётр',
+        'сергей', 'серёга', 'серега', 'серёжа', 'сережа',
+        'андрей', 'андрюха', 'дрей',
+        'алексей', 'лёша', 'леша', 'лёха', 'леха', 'алёша', 'алеша',
+        'михаил', 'миша', 'мишка', 'михась',
+        'павел', 'паша', 'пашка',
+        'николай', 'коля', 'колька', 'николя',
+        'владимир', 'вова', 'володя', 'вован', 'влад',
+        'евгений', 'женя', 'жека',
+        'юрий', 'юра', 'юрка',
+        'владислав', 'влад', 'владик',
+        'артем', 'артём', 'тёма', 'тема',
+        'денис', 'ден', 'дэн',
+        'роман', 'рома', 'ромка',
+        'игорь', 'гарик',
+        'олег', 'олежка',
+        'виктор', 'витя', 'витек',
+        'анатолий', 'толя', 'толик',
+        'екатерина', 'катя', 'катюша', 'катерина',
+        'анастасия', 'настя', 'настюша',
+        'мария', 'маша', 'машка', 'марья',
+        'ольга', 'оля', 'олюшка',
+        'татьяна', 'таня', 'танюша',
+        'елена', 'лена', 'ленка', 'алёна', 'алена',
+        'наталья', 'наташа', 'ната',
+        'светлана', 'света', 'светик',
+        'ирина', 'ира', 'ирка',
+        'виктория', 'вика', 'викуля',
+        'дарья', 'даша', 'дашка',
+        'анна', 'аня', 'анька', 'аннушка'
+    }
+    
+    # Если одно слово - возвращаем его
+    if len(parts) == 1:
+        return {parts[0].lower()}
+    
+    # Если два+ слова - определяем что фамилия
+    surnames = set()
+    
+    for part in parts:
+        part_lower = part.lower()
+        # Если слово НЕ является популярным именем - это кандидат на фамилию
+        if part_lower not in common_first_names:
+            surnames.add(part_lower)
+    
+    # Если не нашли фамилию (все слова - имена или неизвестны) - берем все
+    if not surnames:
+        surnames = {p.lower() for p in parts}
+    
+    return surnames
+
+
 def find_sb_name_duplicates(operations: list, similarity_threshold: float = 0.75) -> list:
     """
     Поиск СБ сотрудников с похожими именами для объединения
+    Использует СТРОГУЮ кластеризацию по фамилии для точности
     similarity_threshold: порог похожести (0.75 = 75%)
     """
     from collections import defaultdict
@@ -2322,66 +2393,86 @@ def find_sb_name_duplicates(operations: list, similarity_threshold: float = 0.75
         if name:
             by_name[name].append(op)
     
-    # Находим похожие имена
-    name_groups = []
-    processed_names = set()
-    
     names_list = list(by_name.keys())
     
+    # ШАГ 1: Строгая кластеризация по фамилии
+    # Используем Union-Find для группировки
+    parent = {name: name for name in names_list}
+    
+    def find(x):
+        if parent[x] != x:
+            parent[x] = find(parent[x])
+        return parent[x]
+    
+    def union(x, y):
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+    
+    # Объединяем имена с общей фамилией
     for i, name1 in enumerate(names_list):
-        if name1 in processed_names:
-            continue
-        
-        # Создаем варианты для name1
-        variants1 = normalize_name_variants(name1)
-        
-        # Ищем похожие имена
-        similar_names = [name1]
-        group_max_similarity = 0.0
+        surnames1 = extract_surname_candidates(name1)
         
         for j, name2 in enumerate(names_list[i+1:], i+1):
-            if name2 in processed_names:
-                continue
+            surnames2 = extract_surname_candidates(name2)
             
-            # Создаем варианты для name2
-            variants2 = normalize_name_variants(name2)
+            # Проверяем: есть ли общая фамилия с похожестью >= 90%
+            has_matching_surname = False
             
-            # Сравниваем все варианты
-            max_similarity = 0.0
-            for v1 in variants1:
-                for v2 in variants2:
-                    similarity = name_similarity(v1, v2)
-                    max_similarity = max(max_similarity, similarity)
+            for s1 in surnames1:
+                for s2 in surnames2:
+                    # СТРОГОЕ сравнение фамилий
+                    surname_similarity = SequenceMatcher(None, s1, s2).ratio()
+                    if surname_similarity >= 0.90:
+                        has_matching_surname = True
+                        break
+                if has_matching_surname:
+                    break
             
-            # Если похожесть выше порога - добавляем в группу
-            if max_similarity >= similarity_threshold:
-                similar_names.append(name2)
-                processed_names.add(name2)
-                group_max_similarity = max(group_max_similarity, max_similarity)
-        
-        # Если нашли похожие - создаем группу
-        if len(similar_names) > 1:
-            processed_names.add(name1)
-            
-            # Собираем все операции для этой группы
+            if has_matching_surname:
+                union(name1, name2)
+    
+    # Собираем кластеры
+    clusters = defaultdict(list)
+    for name in names_list:
+        root = find(name)
+        clusters[root].append(name)
+    
+    # ШАГ 2: Формируем группы только если в кластере > 1 имени
+    name_groups = []
+    
+    for root, cluster_names in clusters.items():
+        if len(cluster_names) > 1:
+            # Собираем все операции для этого кластера
             group_operations = []
-            for name in similar_names:
+            for name in cluster_names:
                 group_operations.extend(by_name[name])
             
             # Вычисляем суммы
             total_nal = sum(op['amount'] for op in group_operations if op['channel'] == 'нал')
             total_beznal = sum(op['amount'] for op in group_operations if op['channel'] == 'безнал')
             
-            # Определяем основное имя (самое длинное или первое)
-            main_name = max(similar_names, key=len)
+            # Определяем основное имя (самое полное/длинное)
+            main_name = max(cluster_names, key=lambda n: (len(n.split()), len(n)))
+            
+            # Вычисляем максимальную похожесть в группе
+            max_similarity = 0.0
+            for i, n1 in enumerate(cluster_names):
+                for n2 in cluster_names[i+1:]:
+                    variants1 = normalize_name_variants(n1)
+                    variants2 = normalize_name_variants(n2)
+                    for v1 in variants1:
+                        for v2 in variants2:
+                            sim = name_similarity(v1, v2)
+                            max_similarity = max(max_similarity, sim)
             
             name_groups.append({
-                'names': similar_names,
+                'names': sorted(cluster_names),  # Сортируем для консистентности
                 'main_name': main_name,
                 'operations': group_operations,
                 'total_nal': total_nal,
                 'total_beznal': total_beznal,
-                'similarity': group_max_similarity if group_max_similarity > 0 else 1.0
+                'similarity': max_similarity if max_similarity > 0 else 1.0
             })
     
     return name_groups
