@@ -2860,7 +2860,15 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
             # Для всех похожих имен указываем основное имя
             for name in group['names']:
                 if name != main_name:
+                    # Нормализуем имена (Ё→Е) для корректного сопоставления
+                    normalized_name = name.replace('ё', 'е').replace('Ё', 'Е')
+                    normalized_main = main_name.replace('ё', 'е').replace('Ё', 'Е')
+                    
+                    # Добавляем оба варианта (с Ё и без) для надёжности
                     sb_name_merges[name] = main_name
+                    if normalized_name != name:
+                        sb_name_merges[normalized_name] = main_name
+                    
                     merged_sb_count += 1  # Считаем объединенные имена
     
     # Получаем данные из БД (БЕЗ изменений!)
