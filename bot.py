@@ -2925,17 +2925,9 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         if remaining_clubs:
             await msg.reply_text(f"🔍 DEBUG: Вызываем generate_and_send_report для {list(remaining_clubs)[0]}")
             # Используем msg для создания правильного update для дальнейших вызовов
-            # Если msg есть (из callback), создаем новый Update с message из msg
-            if msg and not update.message:
-                # Создаем новый Update объект с message из msg
-                new_update = Update(
-                    update_id=update.update_id,
-                    message=msg,
-                    effective_user=update.effective_user,
-                    effective_chat=update.effective_chat
-                )
-            else:
-                new_update = update
+            # Если msg есть (из callback), просто используем исходный update
+            # Он уже содержит всю нужную информацию
+            new_update = update
             
             # Обрабатываем оставшийся клуб через generate_and_send_report
             for club in remaining_clubs:
@@ -2953,16 +2945,8 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
         # Этот блок выполнится ПОСЛЕ того как пользователь обработает дубликаты второго клуба
         if len(state.processed_clubs_for_report) == 2:
             await msg.reply_text(f"🔍 DEBUG: ОБА КЛУБА ОБРАБОТАНЫ! Генерируем сводный отчет...")
-            # Используем msg для update
-            if msg and not update.message:
-                new_update = Update(
-                    update_id=update.update_id,
-                    message=msg,
-                    effective_user=update.effective_user,
-                    effective_chat=update.effective_chat
-                )
-            else:
-                new_update = update
+            # Просто используем исходный update
+            new_update = update
             
             await prepare_merged_report(new_update, state, data['date_from'], data['date_to'])
             
