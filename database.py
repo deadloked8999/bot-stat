@@ -152,14 +152,23 @@ class Database:
                     # Есть конфликт по UNIQUE constraint - старая запись с другим именем
                     conflict_id, conflict_amount, conflict_name = conflict
                     
-                    # ОБХОДНОЙ ПУТЬ: временно меняем код старой записи, чтобы обойти UNIQUE constraint
-                    # Используем уникальный временный код с ID записи
-                    temp_code = f"СБ_TEMP_{conflict_id}"
+                    # ОБХОДНОЙ ПУТЬ: меняем код ВСЕХ существующих СБ записей на уникальные коды
+                    # Сначала получаем все СБ записи для этого клуба, даты и канала
                     cursor.execute("""
-                        UPDATE operations 
-                        SET code = ?
-                        WHERE id = ?
-                    """, (temp_code, conflict_id))
+                        SELECT id FROM operations 
+                        WHERE club = ? AND date = ? AND code = ? AND channel = ?
+                    """, (club, date, code, channel))
+                    
+                    all_sb_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    # Временно меняем коды всех СБ на уникальные
+                    for sb_id in all_sb_ids:
+                        temp_code = f"СБ_{sb_id}"
+                        cursor.execute("""
+                            UPDATE operations 
+                            SET code = ?
+                            WHERE id = ?
+                        """, (temp_code, sb_id))
                     
                     # Теперь можем вставить новую запись без конфликта
                     cursor.execute("""
@@ -167,12 +176,15 @@ class Database:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (club, date, code, name, channel, amount, original_line, created_at))
                     
-                    # Возвращаем старой записи правильный код
-                    cursor.execute("""
-                        UPDATE operations 
-                        SET code = ?
-                        WHERE id = ?
-                    """, (code, conflict_id))
+                    new_id = cursor.lastrowid
+                    
+                    # Возвращаем всем записям правильный код СБ
+                    for sb_id in all_sb_ids:
+                        cursor.execute("""
+                            UPDATE operations 
+                            SET code = ?
+                            WHERE id = ?
+                        """, (code, sb_id))
                     
                     action = f"Добавлена новая запись СБ: {name} - {amount} (сохранена отдельно от {conflict_name})"
                 else:
