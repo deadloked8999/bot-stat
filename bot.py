@@ -4927,7 +4927,7 @@ async def save_file_data(update: Update, state: UserState):
             continue
             
         code = item['code']
-        name = item['name']
+        name = item.get('name', '') or ''  # Убеждаемся что name не None
         
         # Проверяем замены для объединённых сотрудников
         key = f"{code}_{name}"
@@ -4943,9 +4943,12 @@ async def save_file_data(update: Update, state: UserState):
             merge_key = code
         
         if merge_key in beznal_merge_dict:
+            # Используем сумму и имя из объединения
             amount = beznal_merge_dict[merge_key]['amount']
+            name = beznal_merge_dict[merge_key]['name']  # ВАЖНО: обновляем имя из объединения
         else:
             amount = item['amount']
+            # Для СБ без доплат сохраняем имя как есть
             
         db.add_or_update_operation(
             club=club,
@@ -4966,7 +4969,7 @@ async def save_file_data(update: Update, state: UserState):
             continue
             
         code = item['code']
-        name = item['name']
+        name = item.get('name', '') or ''  # Убеждаемся что name не None
         
         # Проверяем замены для объединённых сотрудников
         key = f"{code}_{name}"
@@ -4982,9 +4985,12 @@ async def save_file_data(update: Update, state: UserState):
             merge_key = code
         
         if merge_key in nal_merge_dict:
+            # Используем сумму и имя из объединения
             amount = nal_merge_dict[merge_key]['amount']
+            name = nal_merge_dict[merge_key]['name']  # ВАЖНО: обновляем имя из объединения
         else:
             amount = item['amount']
+            # Для СБ без доплат сохраняем имя как есть
             
         db.add_or_update_operation(
             club=club,
