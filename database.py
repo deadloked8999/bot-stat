@@ -19,6 +19,13 @@ class Database:
         """Получить соединение с БД"""
         return sqlite3.connect(self.db_path)
     
+    @staticmethod
+    def normalize_sb_code(code: str) -> str:
+        """Нормализовать код СБ: СБ_{id} или СБ_{timestamp} -> СБ"""
+        if code and code.startswith('СБ_'):
+            return 'СБ'
+        return code
+    
     def init_database(self):
         """Инициализация базы данных"""
         conn = self.get_connection()
@@ -152,52 +159,24 @@ class Database:
                     # Есть конфликт по UNIQUE constraint - старая запись с другим именем
                     conflict_id, conflict_amount, conflict_name = conflict
                     
-                    try:
-                        # ОБХОДНОЙ ПУТЬ: меняем код ВСЕХ существующих СБ записей на уникальные коды
-                        # Сначала получаем все СБ записи для этого клуба, даты и канала
-                        cursor.execute("""
-                            SELECT id FROM operations 
-                            WHERE club = ? AND date = ? AND code = ? AND channel = ?
-                        """, (club, date, code, channel))
-                        
-                        all_sb_ids = [row[0] for row in cursor.fetchall()]
-                        
-                        # Временно меняем коды всех СБ на уникальные
-                        for sb_id in all_sb_ids:
-                            temp_code = f"СБ_{sb_id}"
-                            cursor.execute("""
-                                UPDATE operations 
-                                SET code = ?
-                                WHERE id = ?
-                            """, (temp_code, sb_id))
-                        
-                        # Коммитим изменения временных кодов
-                        conn.commit()
-                        
-                        # Теперь можем вставить новую запись без конфликта
-                        cursor.execute("""
-                            INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (club, date, code, name, channel, amount, original_line, created_at))
-                        
-                        new_id = cursor.lastrowid
-                        
-                        # Коммитим вставку новой записи
-                        conn.commit()
-                        
-                        # Возвращаем всем старым записям правильный код СБ
-                        for sb_id in all_sb_ids:
-                            cursor.execute("""
-                                UPDATE operations 
-                                SET code = ?
-                                WHERE id = ?
-                            """, (code, sb_id))
-                        
-                        action = f"Добавлена новая запись СБ: {name} - {amount} (сохранена отдельно от {conflict_name})"
-                    except Exception as e:
-                        print(f"Ошибка при обработке конфликта СБ: {e}")
-                        conn.rollback()
-                        raise
+                    # ОБХОДНОЙ ПУТЬ: используем уникальный код для каждого СБ
+                    # Меняем код старой записи на уникальный, чтобы обойти UNIQUE constraint
+                    temp_code = f"СБ_{conflict_id}"
+                    cursor.execute("""
+                        UPDATE operations 
+                        SET code = ?
+                        WHERE id = ?
+                    """, (temp_code, conflict_id))
+                    
+                    # Теперь можем вставить новую запись с уникальным кодом
+                    import time
+                    new_temp_code = f"СБ_{int(time.time() * 1000000)}"  # Уникальный код на основе timestamp
+                    cursor.execute("""
+                        INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (club, date, new_temp_code, name, channel, amount, original_line, created_at))
+                    
+                    action = f"Добавлена новая запись СБ: {name} - {amount} (сохранена отдельно от {conflict_name})"
                 else:
                     # Конфликта нет - просто вставляем
                     cursor.execute("""
@@ -266,7 +245,7 @@ class Database:
         
         return [
             {
-                'code': row[0],
+                'code': self.normalize_sb_code(row[0]),
                 'name': row[1],
                 'channel': row[2],
                 'amount': row[3],
@@ -293,7 +272,7 @@ class Database:
         
         return [
             {
-                'code': row[0],
+                'code': self.normalize_sb_code(row[0]),
                 'name': row[1],
                 'channel': row[2],
                 'amount': row[3],
@@ -574,7 +553,7 @@ class Database:
             {
                 'club': row[0],
                 'date': row[1],
-                'code': row[2],
+                'code': self.normalize_sb_code(row[2]),
                 'channel': row[3],
                 'action': row[4],
                 'old_value': row[5],
@@ -718,7 +697,7 @@ class Database:
             """, (club,))
             
             rows = cursor.fetchall()
-            employees = [{'code': row[0], 'name': row[1]} for row in rows]
+            employees = [{'code': self.normalize_sb_code(row[0]), 'name': row[1]} for row in rows]
             
             conn.close()
             return employees
