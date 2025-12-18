@@ -2397,9 +2397,20 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
     # ДЛЯ СВОДНОГО НЕ передаём sb_name_merges, т.к. уже применили выше!
     if merged_ops:
         try:
-            report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+            # Генерируем сводный отчет
+            report_rows_merged, totals_merged, totals_recalc, check_ok = ReportGenerator.calculate_report(
                 merged_ops,
                 sb_name_merges=None  # УЖЕ применили объединения!
+            )
+            
+            # Генерируем отчеты для каждого клуба отдельно
+            report_rows_m, totals_m, _, _ = ReportGenerator.calculate_report(
+                ops_m,
+                sb_name_merges=state.sb_merges_moskvich if hasattr(state, 'sb_merges_moskvich') else None
+            )
+            report_rows_a, totals_a, _, _ = ReportGenerator.calculate_report(
+                ops_a,
+                sb_name_merges=state.sb_merges_anora if hasattr(state, 'sb_merges_anora') else None
             )
             
             # Краткая сводка вместо полного отчёта
@@ -2408,10 +2419,10 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
             merged_count = merged_regular + merged_sb
             
             summary = format_report_summary(
-                totals, 
+                totals_merged, 
                 "СВОДНЫЙ (Москвич + Анора)", 
                 f"{date_from} .. {date_to}",
-                len(report_rows),
+                len(report_rows_merged),
                 merged_count
             )
             await msg.reply_text(summary)
@@ -2419,16 +2430,21 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
             await msg.reply_text(f"❌ Ошибка генерации отчёта: {str(e)}")
             return
         
-        # Экспорт сводного
+        # Экспорт сводного с тремя листами
         try:
             filename = f"otchet_svodny_{date_from}_{date_to}.xlsx"
-            ReportGenerator.generate_xlsx(
-                report_rows, totals, "СВОДНЫЙ (Москвич + Анора)", f"{date_from} .. {date_to}", filename, db
+            ReportGenerator.generate_merged_xlsx(
+                report_moskvich=(report_rows_m, totals_m),
+                report_anora=(report_rows_a, totals_a),
+                report_merged=(report_rows_merged, totals_merged),
+                period=f"{date_from} .. {date_to}",
+                filename=filename,
+                db=db
             )
             with open(filename, 'rb') as f:
                 await msg.reply_document(
                     document=f, filename=filename,
-                    caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}"
+                    caption=f"📊 СВОДНЫЙ ОТЧЁТ (Оба клуба)\nПериод: {date_from} .. {date_to}\n\n📄 Файл содержит 3 листа:\n• Москвич\n• Анора\n• Сводный"
                 )
             os.remove(filename)
         except Exception as e:

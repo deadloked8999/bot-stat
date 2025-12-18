@@ -6,7 +6,7 @@ from collections import defaultdict
 import csv
 from io import StringIO
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 
 class ReportGenerator:
@@ -223,67 +223,246 @@ class ReportGenerator:
         ws = wb.active
         ws.title = "Отчет"
         
+        # Стили
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
         # Заголовок
         ws['A1'] = f"Отчет по клубу {club}"
         ws['A1'].font = Font(bold=True, size=14)
         ws['A2'] = f"Период: {period}"
         ws['A2'].font = Font(size=11)
         
-        # Шапка таблицы (добавлены два столбца)
+        # Шапка таблицы
         headers = [
             'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 
             'Итог (нал + безнал − 10%)', 'Самозанятость', 'К выплате (самозанятый)'
         ]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=4, column=col, value=header)
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal='center')
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
         
         # Данные
         row_num = 5
         for row_data in report_rows:
-            ws.cell(row=row_num, column=1, value=row_data['name'])
-            ws.cell(row=row_num, column=2, value=row_data['code'])
-            ws.cell(row=row_num, column=3, value=row_data['nal'])
-            ws.cell(row=row_num, column=4, value=row_data['beznal'])
-            ws.cell(row=row_num, column=5, value=row_data['minus10'])
-            ws.cell(row=row_num, column=6, value=row_data['itog'])
+            # Имя (текст, выравнивание влево)
+            cell = ws.cell(row=row_num, column=1, value=row_data['name'])
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border = border
+            
+            # Код (текст, выравнивание влево)
+            cell = ws.cell(row=row_num, column=2, value=row_data['code'])
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border = border
+            
+            # Числовые колонки (выравнивание вправо)
+            for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+                cell = ws.cell(row=row_num, column=col, value=row_data[key])
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+                cell.border = border
             
             # Проверяем статус самозанятости
             if db:
-                # Нормализуем код для корректной проверки
                 normalized_code = row_data['code'].upper().strip()
                 is_self_employed = db.is_self_employed(normalized_code)
                 if is_self_employed:
-                    ws.cell(row=row_num, column=7, value='✓')
-                    # К выплате = ИТОГО / 0.94 (чтобы покрыть 6% налог самозанятого)
+                    cell = ws.cell(row=row_num, column=7, value='✓')
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.border = border
+                    
                     payout = round(row_data['itog'] / 0.94, 2)
-                    ws.cell(row=row_num, column=8, value=payout)
+                    cell = ws.cell(row=row_num, column=8, value=payout)
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.border = border
                 else:
-                    ws.cell(row=row_num, column=7, value='')
-                    ws.cell(row=row_num, column=8, value='')
+                    cell = ws.cell(row=row_num, column=7, value='')
+                    cell.border = border
+                    cell = ws.cell(row=row_num, column=8, value='')
+                    cell.border = border
             else:
-                ws.cell(row=row_num, column=7, value='')
-                ws.cell(row=row_num, column=8, value='')
+                cell = ws.cell(row=row_num, column=7, value='')
+                cell.border = border
+                cell = ws.cell(row=row_num, column=8, value='')
+                cell.border = border
             
             row_num += 1
         
         # Итоги
-        ws.cell(row=row_num, column=1, value='ИТОГО').font = Font(bold=True)
-        ws.cell(row=row_num, column=3, value=totals['nal']).font = Font(bold=True)
-        ws.cell(row=row_num, column=4, value=totals['beznal']).font = Font(bold=True)
-        ws.cell(row=row_num, column=5, value=totals['minus10']).font = Font(bold=True)
-        ws.cell(row=row_num, column=6, value=totals['itog']).font = Font(bold=True)
+        cell = ws.cell(row=row_num, column=1, value='ИТОГО')
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        cell.border = border
+        
+        cell = ws.cell(row=row_num, column=2, value='')
+        cell.border = border
+        
+        for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+            cell = ws.cell(row=row_num, column=col, value=totals[key])
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+            cell.border = border
+        
+        # Пустые ячейки в строке итогов
+        for col in [7, 8]:
+            cell = ws.cell(row=row_num, column=col, value='')
+            cell.border = border
         
         # Ширина столбцов
         ws.column_dimensions['A'].width = 25
-        ws.column_dimensions['B'].width = 8
+        ws.column_dimensions['B'].width = 10
         ws.column_dimensions['C'].width = 12
         ws.column_dimensions['D'].width = 12
         ws.column_dimensions['E'].width = 15
         ws.column_dimensions['F'].width = 25
         ws.column_dimensions['G'].width = 15
         ws.column_dimensions['H'].width = 25
+        
+        # Сохраняем
+        wb.save(filename)
+        return filename
+    
+    @staticmethod
+    def generate_merged_xlsx(report_moskvich: Tuple[List[Dict], Dict],
+                            report_anora: Tuple[List[Dict], Dict],
+                            report_merged: Tuple[List[Dict], Dict],
+                            period: str, filename: str, db=None) -> str:
+        """
+        Генерация сводного XLSX файла с тремя листами:
+        - Лист 1: Москвич
+        - Лист 2: Анора
+        - Лист 3: Сводный
+        
+        report_moskvich: (report_rows, totals) для Москвича
+        report_anora: (report_rows, totals) для Аноры
+        report_merged: (report_rows, totals) для сводного
+        """
+        wb = Workbook()
+        
+        # Стили
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        def fill_sheet(ws, club_name, report_rows, totals):
+            """Заполнить лист данными"""
+            # Заголовок
+            ws['A1'] = f"Отчет по клубу {club_name}"
+            ws['A1'].font = Font(bold=True, size=14)
+            ws['A2'] = f"Период: {period}"
+            ws['A2'].font = Font(size=11)
+            
+            # Шапка таблицы
+            headers = [
+                'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 
+                'Итог (нал + безнал − 10%)', 'Самозанятость', 'К выплате (самозанятый)'
+            ]
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=4, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = border
+            
+            # Данные
+            row_num = 5
+            for row_data in report_rows:
+                # Имя
+                cell = ws.cell(row=row_num, column=1, value=row_data['name'])
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+                cell.border = border
+                
+                # Код
+                cell = ws.cell(row=row_num, column=2, value=row_data['code'])
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+                cell.border = border
+                
+                # Числовые колонки
+                for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+                    cell = ws.cell(row=row_num, column=col, value=row_data[key])
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.border = border
+                
+                # Самозанятость
+                if db:
+                    normalized_code = row_data['code'].upper().strip()
+                    is_self_employed = db.is_self_employed(normalized_code)
+                    if is_self_employed:
+                        cell = ws.cell(row=row_num, column=7, value='✓')
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                        cell.border = border
+                        
+                        payout = round(row_data['itog'] / 0.94, 2)
+                        cell = ws.cell(row=row_num, column=8, value=payout)
+                        cell.alignment = Alignment(horizontal='right', vertical='center')
+                        cell.border = border
+                    else:
+                        cell = ws.cell(row=row_num, column=7, value='')
+                        cell.border = border
+                        cell = ws.cell(row=row_num, column=8, value='')
+                        cell.border = border
+                else:
+                    cell = ws.cell(row=row_num, column=7, value='')
+                    cell.border = border
+                    cell = ws.cell(row=row_num, column=8, value='')
+                    cell.border = border
+                
+                row_num += 1
+            
+            # Итоги
+            cell = ws.cell(row=row_num, column=1, value='ИТОГО')
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border = border
+            
+            cell = ws.cell(row=row_num, column=2, value='')
+            cell.border = border
+            
+            for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+                cell = ws.cell(row=row_num, column=col, value=totals[key])
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+                cell.border = border
+            
+            for col in [7, 8]:
+                cell = ws.cell(row=row_num, column=col, value='')
+                cell.border = border
+            
+            # Ширина столбцов
+            ws.column_dimensions['A'].width = 25
+            ws.column_dimensions['B'].width = 10
+            ws.column_dimensions['C'].width = 12
+            ws.column_dimensions['D'].width = 12
+            ws.column_dimensions['E'].width = 15
+            ws.column_dimensions['F'].width = 25
+            ws.column_dimensions['G'].width = 15
+            ws.column_dimensions['H'].width = 25
+        
+        # Лист 1: Москвич
+        ws1 = wb.active
+        ws1.title = "Москвич"
+        fill_sheet(ws1, "Москвич", report_moskvich[0], report_moskvich[1])
+        
+        # Лист 2: Анора
+        ws2 = wb.create_sheet(title="Анора")
+        fill_sheet(ws2, "Анора", report_anora[0], report_anora[1])
+        
+        # Лист 3: Сводный
+        ws3 = wb.create_sheet(title="Сводный")
+        fill_sheet(ws3, "СВОДНЫЙ (Москвич + Анора)", report_merged[0], report_merged[1])
         
         # Сохраняем
         wb.save(filename)
