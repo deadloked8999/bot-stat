@@ -152,25 +152,29 @@ class Database:
                     # Есть конфликт по UNIQUE constraint - старая запись с другим именем
                     conflict_id, conflict_amount, conflict_name = conflict
                     
-                    # Удаляем старую запись (UNIQUE constraint не позволяет две записи)
+                    # ОБХОДНОЙ ПУТЬ: временно меняем код старой записи, чтобы обойти UNIQUE constraint
+                    # Используем уникальный временный код с ID записи
+                    temp_code = f"СБ_TEMP_{conflict_id}"
                     cursor.execute("""
-                        DELETE FROM operations 
+                        UPDATE operations 
+                        SET code = ?
                         WHERE id = ?
-                    """, (conflict_id,))
+                    """, (temp_code, conflict_id))
                     
-                    # Если aggregate=True, объединяем суммы
-                    if aggregate:
-                        final_amount = conflict_amount + amount
-                        action = f"Добавлена запись СБ: {name} - {final_amount} (объединено с {conflict_name}: {conflict_amount} + {amount})"
-                    else:
-                        final_amount = amount
-                        action = f"Добавлена запись СБ: {name} - {amount} (заменена запись {conflict_name}: {conflict_amount})"
-                    
-                    # Вставляем новую запись с правильным именем
+                    # Теперь можем вставить новую запись без конфликта
                     cursor.execute("""
                         INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (club, date, code, name, channel, final_amount, original_line, created_at))
+                    """, (club, date, code, name, channel, amount, original_line, created_at))
+                    
+                    # Возвращаем старой записи правильный код
+                    cursor.execute("""
+                        UPDATE operations 
+                        SET code = ?
+                        WHERE id = ?
+                    """, (code, conflict_id))
+                    
+                    action = f"Добавлена новая запись СБ: {name} - {amount} (сохранена отдельно от {conflict_name})"
                 else:
                     # Конфликта нет - просто вставляем
                     cursor.execute("""
