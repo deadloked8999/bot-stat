@@ -96,48 +96,127 @@ class Database:
         """
         Добавить или обновить операцию
         aggregate: если True - складывать суммы, если False - заменять
+        
+        ВАЖНО: Для СБ проверка существования учитывает имя, чтобы разные СБ 
+        с одинаковым кодом не объединялись в одну запись.
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        # Проверяем, существует ли запись
-        cursor.execute("""
-            SELECT amount FROM operations 
-            WHERE club = ? AND date = ? AND code = ? AND channel = ?
-        """, (club, date, code, channel))
-        
-        existing = cursor.fetchone()
         created_at = datetime.now().isoformat()
         
-        if existing:
-            old_amount = existing[0]
-            if aggregate:
-                new_amount = old_amount + amount
-                action = f"Добавлено к существующей сумме: {old_amount} + {amount} = {new_amount}"
+        # Для СБ проверка существования должна учитывать имя
+        # Для остальных кодов - только по (club, date, code, channel)
+        if code == 'СБ' and name:
+            # Проверяем существование с учетом имени
+            cursor.execute("""
+                SELECT id, amount, name_snapshot FROM operations 
+                WHERE club = ? AND date = ? AND code = ? AND channel = ? AND name_snapshot = ?
+            """, (club, date, code, channel, name))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Найдена запись с таким же именем - обновляем
+                record_id, old_amount, old_name = existing
+                if aggregate:
+                    new_amount = old_amount + amount
+                    action = f"Добавлено к существующей сумме: {old_amount} + {amount} = {new_amount}"
+                else:
+                    new_amount = amount
+                    action = f"Заменено: {old_amount} → {new_amount}"
+                
+                # Обновляем запись (имя сохраняем существующее)
+                cursor.execute("""
+                    UPDATE operations 
+                    SET amount = ?, original_line = ?, created_at = ?
+                    WHERE id = ?
+                """, (new_amount, original_line, created_at, record_id))
+                
+                # Записываем в журнал
+                cursor.execute("""
+                    INSERT INTO edit_log (club, date, code, channel, action, old_value, new_value, edited_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (club, date, code, channel, 'update' if aggregate else 'replace', 
+                      old_amount, new_amount, created_at))
             else:
-                new_amount = amount
-                action = f"Заменено: {old_amount} → {new_amount}"
-            
-            # Обновляем запись
-            cursor.execute("""
-                UPDATE operations 
-                SET amount = ?, name_snapshot = ?, original_line = ?, created_at = ?
-                WHERE club = ? AND date = ? AND code = ? AND channel = ?
-            """, (new_amount, name, original_line, created_at, club, date, code, channel))
-            
-            # Записываем в журнал
-            cursor.execute("""
-                INSERT INTO edit_log (club, date, code, channel, action, old_value, new_value, edited_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (club, date, code, channel, 'update' if aggregate else 'replace', 
-                  old_amount, new_amount, created_at))
+                # Записи с таким именем нет - проверяем, нет ли конфликта по UNIQUE constraint
+                # (другой СБ с тем же кодом, датой и каналом, но другим именем)
+                cursor.execute("""
+                    SELECT id, amount, name_snapshot FROM operations 
+                    WHERE club = ? AND date = ? AND code = ? AND channel = ?
+                """, (club, date, code, channel))
+                
+                conflict = cursor.fetchone()
+                
+                if conflict:
+                    # Есть конфликт по UNIQUE constraint - старая запись с другим именем
+                    conflict_id, conflict_amount, conflict_name = conflict
+                    
+                    # Удаляем старую запись (UNIQUE constraint не позволяет две записи)
+                    cursor.execute("""
+                        DELETE FROM operations 
+                        WHERE id = ?
+                    """, (conflict_id,))
+                    
+                    # Если aggregate=True, объединяем суммы
+                    if aggregate:
+                        final_amount = conflict_amount + amount
+                        action = f"Добавлена запись СБ: {name} - {final_amount} (объединено с {conflict_name}: {conflict_amount} + {amount})"
+                    else:
+                        final_amount = amount
+                        action = f"Добавлена запись СБ: {name} - {amount} (заменена запись {conflict_name}: {conflict_amount})"
+                    
+                    # Вставляем новую запись с правильным именем
+                    cursor.execute("""
+                        INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (club, date, code, name, channel, final_amount, original_line, created_at))
+                else:
+                    # Конфликта нет - просто вставляем
+                    cursor.execute("""
+                        INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (club, date, code, name, channel, amount, original_line, created_at))
+                    action = f"Добавлена новая запись: {amount}"
         else:
-            # Вставляем новую запись
+            # Для не-СБ или СБ без имени - стандартная логика
             cursor.execute("""
-                INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (club, date, code, name, channel, amount, original_line, created_at))
-            action = f"Добавлена новая запись: {amount}"
+                SELECT id, amount, name_snapshot FROM operations 
+                WHERE club = ? AND date = ? AND code = ? AND channel = ?
+            """, (club, date, code, channel))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                record_id, old_amount, old_name = existing
+                if aggregate:
+                    new_amount = old_amount + amount
+                    action = f"Добавлено к существующей сумме: {old_amount} + {amount} = {new_amount}"
+                else:
+                    new_amount = amount
+                    action = f"Заменено: {old_amount} → {new_amount}"
+                
+                # Обновляем запись (имя обновляем только если оно изменилось)
+                final_name = name if name else old_name
+                cursor.execute("""
+                    UPDATE operations 
+                    SET amount = ?, name_snapshot = ?, original_line = ?, created_at = ?
+                    WHERE id = ?
+                """, (new_amount, final_name, original_line, created_at, record_id))
+                
+                # Записываем в журнал
+                cursor.execute("""
+                    INSERT INTO edit_log (club, date, code, channel, action, old_value, new_value, edited_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (club, date, code, channel, 'update' if aggregate else 'replace', 
+                      old_amount, new_amount, created_at))
+            else:
+                # Вставляем новую запись
+                cursor.execute("""
+                    INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (club, date, code, name, channel, amount, original_line, created_at))
+                action = f"Добавлена новая запись: {amount}"
         
         conn.commit()
         conn.close()
