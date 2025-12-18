@@ -430,12 +430,21 @@ class DataParser:
                 regular.append(item)
         
         # Индексируем обычные записи по коду
+        # ВАЖНО: Для СБ индексируем по (код + имя), чтобы разные СБ не объединялись
         by_code = {}
         for item in regular:
             code = item['code']
-            if code not in by_code:
-                by_code[code] = []
-            by_code[code].append(item)
+            name = item.get('name', '')
+            
+            # Для СБ используем комбинацию код+имя как ключ
+            if code == 'СБ' and name:
+                key = f"{code}_{name}"
+            else:
+                key = code
+            
+            if key not in by_code:
+                by_code[key] = []
+            by_code[key].append(item)
         
         merges = []
         not_found = []
@@ -443,6 +452,7 @@ class DataParser:
         
         for add_item in additional:
             code = add_item['code']
+            add_name = add_item.get('name', '')
             
             # Проверяем есть ли код
             if not code or not DataParser.is_code(code):
@@ -450,10 +460,16 @@ class DataParser:
                 no_code.append(add_item)
                 continue
             
-            # Ищем основную запись с таким кодом
-            if code in by_code:
+            # Для СБ ищем по комбинации код+имя
+            if code == 'СБ' and add_name:
+                search_key = f"{code}_{add_name}"
+            else:
+                search_key = code
+            
+            # Ищем основную запись с таким ключом
+            if search_key in by_code:
                 # Нашли! Создаем объединение
-                main_items = by_code[code]
+                main_items = by_code[search_key]
                 merges.append({
                     'code': code,
                     'main_items': main_items,  # Может быть несколько основных записей

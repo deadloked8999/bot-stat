@@ -4852,6 +4852,7 @@ async def save_file_data(update: Update, state: UserState):
     nal_merge_dict = {}
     
     # БЕЗНАЛ - собираем объединения которые нужно применить
+    # ВАЖНО: Для СБ используем ключ code_name, чтобы разные СБ не объединялись
     beznal_merges = beznal_analysis.get('merges', [])
     for merge in beznal_merges:
         merge_id = merge.get('merge_id')
@@ -4864,12 +4865,21 @@ async def save_file_data(update: Update, state: UserState):
         
         if should_apply:
             code = merge['code']
-            beznal_merge_dict[code] = {
+            name = merge['main_items'][0]['name'] if merge['main_items'] else ''
+            
+            # Для СБ используем комбинацию code_name как ключ
+            if code == 'СБ' and name:
+                merge_key = f"{code}_{name}"
+            else:
+                merge_key = code
+            
+            beznal_merge_dict[merge_key] = {
                 'amount': merge['total_amount'],
-                'name': merge['main_items'][0]['name'] if merge['main_items'] else ''
+                'name': name
             }
     
     # НАЛ - собираем объединения которые нужно применить
+    # ВАЖНО: Для СБ используем ключ code_name, чтобы разные СБ не объединялись
     nal_merges = nal_analysis.get('merges', [])
     for merge in nal_merges:
         merge_id = merge.get('merge_id')
@@ -4882,9 +4892,17 @@ async def save_file_data(update: Update, state: UserState):
         
         if should_apply:
             code = merge['code']
-            nal_merge_dict[code] = {
+            name = merge['main_items'][0]['name'] if merge['main_items'] else ''
+            
+            # Для СБ используем комбинацию code_name как ключ
+            if code == 'СБ' and name:
+                merge_key = f"{code}_{name}"
+            else:
+                merge_key = code
+            
+            nal_merge_dict[merge_key] = {
                 'amount': merge['total_amount'],
-                'name': merge['main_items'][0]['name'] if merge['main_items'] else ''
+                'name': name
             }
     
     # Создаём словарь замен для объединённых сотрудников
@@ -4918,8 +4936,14 @@ async def save_file_data(update: Update, state: UserState):
             name = employee_replacements[key]['name']
         
         # Если код объединяется (доплаты) - используем итоговую сумму
-        if item['code'] in beznal_merge_dict:
-            amount = beznal_merge_dict[item['code']]['amount']
+        # Для СБ проверяем по комбинации code_name
+        if code == 'СБ' and name:
+            merge_key = f"{code}_{name}"
+        else:
+            merge_key = code
+        
+        if merge_key in beznal_merge_dict:
+            amount = beznal_merge_dict[merge_key]['amount']
         else:
             amount = item['amount']
             
@@ -4951,8 +4975,14 @@ async def save_file_data(update: Update, state: UserState):
             name = employee_replacements[key]['name']
         
         # Если код объединяется (доплаты) - используем итоговую сумму
-        if item['code'] in nal_merge_dict:
-            amount = nal_merge_dict[item['code']]['amount']
+        # Для СБ проверяем по комбинации code_name
+        if code == 'СБ' and name:
+            merge_key = f"{code}_{name}"
+        else:
+            merge_key = code
+        
+        if merge_key in nal_merge_dict:
+            amount = nal_merge_dict[merge_key]['amount']
         else:
             amount = item['amount']
             
