@@ -124,6 +124,11 @@ class UserState:
         self.stylist_clarification_queue: Optional[list] = None  # Очередь записей требующих уточнения
         self.stylist_clarification_index: Optional[int] = None  # Текущий индекс в очереди
         
+        # Для просмотра/управления стилистами
+        self.stylist_view_club: Optional[str] = None
+        self.stylist_view_from: Optional[str] = None
+        self.stylist_view_to: Optional[str] = None
+        
         # ID сообщений бота для удаления
         self.bot_messages: list = []
     
@@ -876,6 +881,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка уточнений для расходов на стилистов (выбор имени)
     if state.mode == 'awaiting_stylist_clarification':
         await handle_stylist_clarification(update, state, text)
+        return
+    
+    # Обработка удаления записей стилистов при просмотре
+    if state.mode == 'awaiting_stylist_view_delete':
+        await handle_stylist_view_delete(update, state, text)
+        return
+    
+    # Обработка редактирования записей стилистов при просмотре
+    if state.mode == 'awaiting_stylist_view_edit':
+        await handle_stylist_view_edit_number(update, state, text)
+        return
+    
+    # Обработка ввода новых данных при редактировании
+    if state.mode == 'awaiting_stylist_view_edit_data':
+        await handle_stylist_view_edit_data(update, state, text)
         return
     
     # Команда "готово"
@@ -3821,6 +3841,62 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         club = 'Москвич' if query.data == 'stylist_view_moskvich' else 'Анора'
         await handle_stylist_view(query, club)
     
+    elif query.data.startswith('stylist_show_'):
+        # Показать детали периода: stylist_show_CLUB_FROM_TO
+        parts = query.data.replace('stylist_show_', '').split('_')
+        if len(parts) >= 3:
+            club = parts[0]  # Москвич или Анора
+            period_from = '_'.join(parts[1:-1])  # может быть 2024-12-14
+            period_to = parts[-1]
+            await show_stylist_period_details(query, club, period_from, period_to)
+    
+    elif query.data.startswith('stylist_del_ask_'):
+        # Запрос на удаление: stylist_del_ask_CLUB_FROM_TO
+        parts = query.data.replace('stylist_del_ask_', '').split('_')
+        if len(parts) >= 3:
+            club = parts[0]
+            period_from = '_'.join(parts[1:-1])
+            period_to = parts[-1]
+            
+            user_id = query.from_user.id
+            state = get_user_state(user_id)
+            state.stylist_view_club = club
+            state.stylist_view_from = period_from
+            state.stylist_view_to = period_to
+            state.mode = 'awaiting_stylist_view_delete'
+            
+            await query.edit_message_text(
+                "🗑️ УДАЛЕНИЕ ЗАПИСЕЙ\n\n"
+                "Введите номера записей для удаления:\n\n"
+                "Примеры:\n"
+                "• 3\n"
+                "• 1 5 8\n"
+                "• 1-5\n\n"
+                "Или ОТМЕНА"
+            )
+    
+    elif query.data.startswith('stylist_edit_ask_'):
+        # Запрос на редактирование: stylist_edit_ask_CLUB_FROM_TO
+        parts = query.data.replace('stylist_edit_ask_', '').split('_')
+        if len(parts) >= 3:
+            club = parts[0]
+            period_from = '_'.join(parts[1:-1])
+            period_to = parts[-1]
+            
+            user_id = query.from_user.id
+            state = get_user_state(user_id)
+            state.stylist_view_club = club
+            state.stylist_view_from = period_from
+            state.stylist_view_to = period_to
+            state.mode = 'awaiting_stylist_view_edit'
+            
+            await query.edit_message_text(
+                "✏️ РЕДАКТИРОВАНИЕ ЗАПИСИ\n\n"
+                "Введите номер записи для редактирования:\n\n"
+                "Пример: 4\n\n"
+                "Или ОТМЕНА"
+            )
+    
     elif query.data.startswith('stylist_delete_'):
         # Удаление периода расходов: stylist_delete_CLUB_FROM_TO
         parts = query.data.replace('stylist_delete_', '').split('_')
@@ -4674,31 +4750,94 @@ async def handle_stylist_view(query, club: str):
         )
         return
     
-    message = f"📋 РАСХОДЫ НА СТИЛИСТОВ\n\n🏢 Клуб: {club}\n\n"
-    
-    keyboard = []
-    for period in periods:
-        period_from = period['period_from']
-        period_to = period['period_to']
-        count = period['count']
-        total = period['total_amount']
+    # Если периодов несколько - показываем выбор
+    if len(periods) > 1:
+        message = f"📋 РАСХОДЫ НА СТИЛИСТОВ\n\n🏢 Клуб: {club}\n\n"
+        message += "Выберите период:\n\n"
         
-        message += f"📅 {period_from} - {period_to}\n"
-        message += f"   Записей: {count}, Сумма: {total}₽\n\n"
+        keyboard = []
+        for period in periods:
+            period_from = period['period_from']
+            period_to = period['period_to']
+            count = period['count']
+            total = period['total_amount']
+            
+            message += f"📅 {period_from} - {period_to}\n"
+            message += f"   Записей: {count}, Сумма: {total}₽\n\n"
+            
+            # Кнопка для просмотра периода
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📋 {period_from} - {period_to}",
+                    callback_data=f'stylist_show_{club}_{period_from}_{period_to}'
+                )
+            ])
         
-        # Кнопка удаления для каждого периода
-        club_code = 'moskvich' if club == 'Москвич' else 'anora'
-        keyboard.append([
-            InlineKeyboardButton(
-                f"❌ Удалить {period_from} - {period_to}",
-                callback_data=f'stylist_delete_{club_code}_{period_from}_{period_to}'
-            )
-        ])
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        # Один период - сразу показываем детали
+        period = periods[0]
+        await show_stylist_period_details(query, club, period['period_from'], period['period_to'])
+
+
+async def show_stylist_period_details(query_or_update, club: str, period_from: str, period_to: str):
+    """Показать детали расходов стилистов за период"""
+    expenses = db.get_stylist_expenses_by_period(club, period_from, period_to)
     
-    await query.edit_message_text(
-        message,
-        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
-    )
+    if not expenses:
+        message = f"📋 РАСХОДЫ НА СТИЛИСТОВ\n\n"
+        message += f"🏢 Клуб: {club}\n"
+        message += f"📅 Период: {period_from} - {period_to}\n\n"
+        message += "❌ Нет записей"
+        
+        if hasattr(query_or_update, 'edit_message_text'):
+            await query_or_update.edit_message_text(message)
+        else:
+            await query_or_update.message.reply_text(message)
+        return
+    
+    message = f"📋 РАСХОДЫ НА СТИЛИСТОВ\n\n"
+    message += f"🏢 Клуб: {club}\n"
+    message += f"📅 Период: {period_from} - {period_to}\n\n"
+    message += f"№  | {'Код':<8} | {'Имя':<15} | Сумма\n"
+    message += "-" * 45 + "\n"
+    
+    total = 0
+    for i, exp in enumerate(expenses[:50], 1):  # Первые 50
+        message += f"{i:<2} | {exp['code']:<8} | {exp['name']:<15} | {exp['amount']}₽\n"
+        total += exp['amount']
+    
+    if len(expenses) > 50:
+        message += f"\n... и ещё {len(expenses) - 50} записей"
+        total = sum(exp['amount'] for exp in expenses)
+    
+    message += "\n" + "-" * 45 + "\n"
+    message += f"Всего: {len(expenses)} расходов на {total}₽\n\n"
+    message += "Команды:\n"
+    message += "• УДАЛИТЬ [номера] - удалить записи\n"
+    message += "• ИСПРАВИТЬ [номер] - изменить запись"
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("🗑️ Удалить записи", callback_data=f'stylist_del_ask_{club}_{period_from}_{period_to}'),
+            InlineKeyboardButton("✏️ Исправить", callback_data=f'stylist_edit_ask_{club}_{period_from}_{period_to}')
+        ],
+        [InlineKeyboardButton("🔙 Назад", callback_data=f'stylist_view_{club.lower()}')]
+    ]
+    
+    if hasattr(query_or_update, 'edit_message_text'):
+        await query_or_update.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await query_or_update.message.reply_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 
 async def handle_self_employed_add(update: Update, state: UserState, code: str):
@@ -5834,6 +5973,198 @@ def main():
     print("[BOT] Бот запущен!")
     print("Для остановки нажмите Ctrl+C")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+async def handle_stylist_view_delete(update: Update, state: UserState, text: str):
+    """Обработка удаления записей стилистов при просмотре"""
+    if text.lower() == 'отмена':
+        state.mode = None
+        await update.message.reply_text("❌ Отменено")
+        return
+    
+    # Парсим номера
+    numbers = []
+    try:
+        # Поддержка: "3", "1 5 8", "1-5"
+        parts = text.replace(',', ' ').split()
+        for part in parts:
+            if '-' in part:
+                # Диапазон: 1-5
+                start, end = map(int, part.split('-'))
+                numbers.extend(range(start, end + 1))
+            else:
+                numbers.append(int(part))
+    except:
+        await update.message.reply_text(
+            "❌ Неверный формат.\n\n"
+            "Примеры:\n• 3\n• 1 5 8\n• 1-5"
+        )
+        return
+    
+    # Получаем записи
+    expenses = db.get_stylist_expenses_by_period(
+        state.stylist_view_club,
+        state.stylist_view_from,
+        state.stylist_view_to
+    )
+    
+    # Удаляем по id (записи нумеруются с 1)
+    deleted = 0
+    for num in numbers:
+        if 1 <= num <= len(expenses):
+            exp = expenses[num - 1]
+            # Удаляем из БД по уникальным полям
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM stylist_expenses
+                WHERE club = ? AND period_from = ? AND period_to = ?
+                  AND code = ? AND name = ? AND amount = ?
+                LIMIT 1
+            """, (
+                state.stylist_view_club,
+                state.stylist_view_from,
+                state.stylist_view_to,
+                exp['code'],
+                exp['name'],
+                exp['amount']
+            ))
+            conn.commit()
+            conn.close()
+            deleted += 1
+    
+    state.mode = None
+    await update.message.reply_text(
+        f"✅ Удалено записей: {deleted}\n\n"
+        f"Для просмотра обновленного списка:\n"
+        f"СТИЛИСТЫ → Показать расходы"
+    )
+
+
+async def handle_stylist_view_edit_number(update: Update, state: UserState, text: str):
+    """Обработка выбора номера записи для редактирования"""
+    if text.lower() == 'отмена':
+        state.mode = None
+        await update.message.reply_text("❌ Отменено")
+        return
+    
+    try:
+        number = int(text.strip())
+    except:
+        await update.message.reply_text("❌ Введите номер записи (число)")
+        return
+    
+    # Получаем записи
+    expenses = db.get_stylist_expenses_by_period(
+        state.stylist_view_club,
+        state.stylist_view_from,
+        state.stylist_view_to
+    )
+    
+    if number < 1 or number > len(expenses):
+        await update.message.reply_text(f"❌ Номер вне диапазона (1-{len(expenses)})")
+        return
+    
+    exp = expenses[number - 1]
+    state.stylist_view_edit_index = number - 1
+    state.mode = 'awaiting_stylist_view_edit_data'
+    
+    await update.message.reply_text(
+        f"✏️ РЕДАКТИРОВАНИЕ ЗАПИСИ #{number}\n\n"
+        f"Текущие данные:\n"
+        f"Код: {exp['code']}\n"
+        f"Имя: {exp['name']}\n"
+        f"Сумма: {exp['amount']}₽\n\n"
+        f"Введите новые данные в формате:\n"
+        f"КОД ИМЯ СУММА\n\n"
+        f"Пример: Д13 Марго 3500\n\n"
+        f"Или ОТМЕНА"
+    )
+
+
+async def handle_stylist_view_edit_data(update: Update, state: UserState, text: str):
+    """Обработка ввода новых данных при редактировании"""
+    if text.lower() == 'отмена':
+        state.mode = None
+        await update.message.reply_text("❌ Отменено")
+        return
+    
+    # Парсим данные
+    from parser import DataParser
+    expenses, errors = DataParser.parse_stylist_expenses(text)
+    
+    if errors or len(expenses) != 1:
+        await update.message.reply_text(
+            "❌ Неверный формат.\n\n"
+            "Введите данные в формате:\n"
+            "КОД ИМЯ СУММА\n\n"
+            "Пример: Д13 Марго 3500"
+        )
+        return
+    
+    new_exp = expenses[0]
+    
+    # Получаем старую запись
+    old_expenses = db.get_stylist_expenses_by_period(
+        state.stylist_view_club,
+        state.stylist_view_from,
+        state.stylist_view_to
+    )
+    
+    if state.stylist_view_edit_index >= len(old_expenses):
+        await update.message.reply_text("❌ Ошибка: запись не найдена")
+        state.mode = None
+        return
+    
+    old_exp = old_expenses[state.stylist_view_edit_index]
+    
+    # Удаляем старую и добавляем новую
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    # Удаляем старую
+    cursor.execute("""
+        DELETE FROM stylist_expenses
+        WHERE club = ? AND period_from = ? AND period_to = ?
+          AND code = ? AND name = ? AND amount = ?
+        LIMIT 1
+    """, (
+        state.stylist_view_club,
+        state.stylist_view_from,
+        state.stylist_view_to,
+        old_exp['code'],
+        old_exp['name'],
+        old_exp['amount']
+    ))
+    
+    # Добавляем новую
+    from datetime import datetime
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute("""
+        INSERT INTO stylist_expenses 
+        (club, period_from, period_to, code, name, amount, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        state.stylist_view_club,
+        state.stylist_view_from,
+        state.stylist_view_to,
+        new_exp['code'],
+        new_exp['name'],
+        new_exp['amount'],
+        now
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    state.mode = None
+    await update.message.reply_text(
+        f"✅ ЗАПИСЬ ОБНОВЛЕНА\n\n"
+        f"Было: {old_exp['code']} {old_exp['name']} {old_exp['amount']}₽\n"
+        f"Стало: {new_exp['code']} {new_exp['name']} {new_exp['amount']}₽\n\n"
+        f"Для просмотра обновленного списка:\n"
+        f"СТИЛИСТЫ → Показать расходы"
+    )
 
 
 if __name__ == '__main__':
