@@ -84,23 +84,11 @@ class ReportGenerator:
                 # Проверяем, есть ли такой сотрудник в данных
                 if group_key in employee_data:
                     print(f"  ✅ Сотрудник НАЙДЕН в данных")
-                    # Проверяем совпадение имени (для безопасности)
-                    names_in_data = list(employee_data[group_key]['names'])
-                    # Нормализуем имена для сравнения
-                    names_normalized = [n.lower().strip() for n in names_in_data]
-                    exp_name_normalized = exp_name.lower().strip()
-                    
-                    print(f"  📝 Имена в данных: {names_in_data}")
-                    print(f"  📝 Имена нормализованные: {names_normalized}")
-                    print(f"  📝 Имя стилиста нормализованное: {exp_name_normalized}")
-                    
-                    if exp_name_normalized in names_normalized or not names_in_data:
-                        print(f"  ✅ Имя СОВПАЛО! Добавляю {exp_amount}₽")
-                        employee_data[group_key]['stylist'] += exp_amount
-                    else:
-                        print(f"  ❌ Имя НЕ СОВПАЛО! Пропускаю.")
+                    # Добавляем расход по коду (имя не проверяем)
+                    print(f"  ✅ Добавляю {exp_amount}₽ к коду {group_key}")
+                    employee_data[group_key]['stylist'] += exp_amount
                 else:
-                    print(f"  ❌ Сотрудник НЕ НАЙДЕН в данных")
+                    print(f"  ❌ Сотрудник НЕ НАЙДЕН в данных (код {group_key} отсутствует в operations)")
         
         # Формируем строки отчета
         report_rows = []
