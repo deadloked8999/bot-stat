@@ -1364,8 +1364,14 @@ async def handle_report_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
     
+    # Загружаем расходы на стилистов для этого периода
+    stylist_expenses = db.get_stylist_expenses_for_period(club, date_from, date_to)
+    
     # Генерируем отчет
-    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(operations)
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+        operations, 
+        stylist_expenses=stylist_expenses
+    )
     
     report_text = ReportGenerator.format_report_text(
         report_rows, totals, check_ok, totals_recalc, club, f"{date_from} .. {date_to}"
