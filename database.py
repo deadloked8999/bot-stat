@@ -667,12 +667,22 @@ class Database:
     
     def init_self_employed_list(self, codes: List[str]) -> int:
         """
-        Инициализация списка самозанятых (для первого запуска)
+        Инициализация списка самозанятых (ТОЛЬКО если таблица пустая)
         Возвращает количество добавленных кодов
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # Проверяем: есть ли уже записи в таблице
+        cursor.execute("SELECT COUNT(*) FROM self_employed")
+        count = cursor.fetchone()[0]
+        
+        # Если таблица НЕ пустая - ничего не делаем
+        if count > 0:
+            conn.close()
+            return 0
+        
+        # Таблица пустая - инициализируем список
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         added = 0
         
@@ -680,11 +690,10 @@ class Database:
             code = code.upper().strip()
             try:
                 cursor.execute(
-                    "INSERT OR IGNORE INTO self_employed (code, marked_at) VALUES (?, ?)",
+                    "INSERT INTO self_employed (code, marked_at) VALUES (?, ?)",
                     (code, now)
                 )
-                if cursor.rowcount > 0:
-                    added += 1
+                added += 1
             except:
                 continue
         
