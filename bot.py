@@ -2537,6 +2537,48 @@ async def generate_merged_report(update: Update, state: UserState, excluded_regu
                 stylist_expenses=stylist_expenses_a
             )
             
+            # НОВАЯ ЛОГИКА: формируем сводный отчет складывая готовые отчеты
+            from collections import defaultdict
+            
+            # Индексируем строки по (код, имя)
+            merged_dict = defaultdict(lambda: {
+                'name': '', 'code': '', 'nal': 0, 'beznal': 0, 'minus10': 0, 'stylist': 0, 'itog': 0
+            })
+            
+            # Добавляем строки из Москвича
+            for row in report_rows_m:
+                key = (row['code'], row['name'])
+                merged_dict[key]['name'] = row['name']
+                merged_dict[key]['code'] = row['code']
+                merged_dict[key]['nal'] += row['nal']
+                merged_dict[key]['beznal'] += row['beznal']
+                merged_dict[key]['stylist'] += row['stylist']
+            
+            # Добавляем строки из Аноры
+            for row in report_rows_a:
+                key = (row['code'], row['name'])
+                merged_dict[key]['name'] = row['name']
+                merged_dict[key]['code'] = row['code']
+                merged_dict[key]['nal'] += row['nal']
+                merged_dict[key]['beznal'] += row['beznal']
+                merged_dict[key]['stylist'] += row['stylist']
+            
+            # Пересчитываем 10% и итого для каждой строки
+            report_rows_merged = []
+            for key, data in sorted(merged_dict.items()):
+                data['minus10'] = round(data['beznal'] * 0.10, 2)
+                data['itog'] = round(data['nal'] + (data['beznal'] - data['minus10']) - data['stylist'], 2)
+                report_rows_merged.append(data)
+            
+            # Пересчитываем итоги
+            totals_merged = {
+                'nal': sum(row['nal'] for row in report_rows_merged),
+                'beznal': sum(row['beznal'] for row in report_rows_merged),
+                'minus10': sum(row['minus10'] for row in report_rows_merged),
+                'stylist': sum(row['stylist'] for row in report_rows_merged),
+                'itog': sum(row['itog'] for row in report_rows_merged)
+            }
+            
             # Краткая сводка вместо полного отчёта
             merged_regular = len(state.merge_candidates) - len(excluded_regular) if state.merge_candidates else 0
             merged_sb = len(sb_matches) - len(excluded_sb) if sb_matches else 0
