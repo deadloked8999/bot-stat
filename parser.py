@@ -521,4 +521,135 @@ class DataParser:
                 result.append(f"  ... и ещё {len(errors) - 5} ошибок")
         
         return '\n'.join(result)
+    
+    @staticmethod
+    def parse_stylist_expenses(text: str) -> Tuple[str, str, List[Dict], List[str]]:
+        """
+        Парсинг данных о расходах на стилистов
+        
+        Формат входных данных:
+        Визажист Оксана
+        14.12-20.12
+        Д14Бритни 2000
+        А13Варя 1500
+        Н5 деля 1500
+        
+        Args:
+            text: Текст с данными о расходах
+        
+        Returns:
+            (date_from, date_to, expenses_list, errors)
+            date_from: начало периода (YYYY-MM-DD)
+            date_to: конец периода (YYYY-MM-DD)
+            expenses_list: [{'code': 'Д14', 'name': 'Бритни', 'amount': 2000}, ...]
+            errors: список строк с ошибками
+        """
+        from datetime import datetime
+        
+        lines = text.strip().split('\n')
+        date_from = None
+        date_to = None
+        expenses = []
+        errors = []
+        
+        # Паттерн для периода: ДД.ММ-ДД.ММ или ДД.ММ.ГГГГ-ДД.ММ.ГГГГ
+        period_pattern = r'(\d{1,2}\.\d{1,2}(?:\.\d{4})?)\s*-\s*(\d{1,2}\.\d{1,2}(?:\.\d{4})?)'
+        
+        # Паттерн для расхода: КОД (буквы+цифры) + ИМЯ (буквы) + СУММА (цифры)
+        # Учитываем возможные пробелы между кодом и именем
+        expense_pattern = r'^([А-ЯЁA-Z]+\d+)\s*([А-ЯЁа-яёA-Za-z]+)\s+(\d+)$'
+        
+        # Карта латинских букв на кириллические
+        latin_to_cyrillic = {
+            'A': 'А', 'B': 'В', 'C': 'С', 'E': 'Е', 'H': 'Н', 'K': 'К',
+            'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х', 'Y': 'У'
+        }
+        
+        def normalize_code_cyrillic(code: str) -> str:
+            """Заменить латинские буквы на кириллические в коде"""
+            result = []
+            for char in code.upper():
+                if char in latin_to_cyrillic:
+                    result.append(latin_to_cyrillic[char])
+                else:
+                    result.append(char)
+            return ''.join(result)
+        
+        def parse_date(date_str: str) -> str:
+            """Парсинг даты из формата ДД.ММ или ДД.ММ.ГГГГ в YYYY-MM-DD"""
+            parts = date_str.strip().split('.')
+            if len(parts) == 2:
+                # ДД.ММ -> добавляем текущий год
+                day, month = parts
+                year = datetime.now().year
+            elif len(parts) == 3:
+                # ДД.ММ.ГГГГ
+                day, month, year = parts
+            else:
+                raise ValueError(f"Неверный формат даты: {date_str}")
+            
+            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        
+        # Шаг 1: Найти период
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            match = re.search(period_pattern, line)
+            if match:
+                try:
+                    date_from = parse_date(match.group(1))
+                    date_to = parse_date(match.group(2))
+                    break
+                except Exception as e:
+                    errors.append(f"Ошибка парсинга периода '{line}': {e}")
+        
+        # Если период не найден - ошибка
+        if not date_from or not date_to:
+            errors.append("❌ Не найден период в формате ДД.ММ-ДД.ММ или ДД.ММ.ГГГГ-ДД.ММ.ГГГГ")
+            return None, None, [], errors
+        
+        # Шаг 2: Парсим строки с расходами
+        for line in lines:
+            line = line.strip()
+            
+            # Пропускаем пустые строки
+            if not line:
+                continue
+            
+            # Пропускаем строку с периодом
+            if re.search(period_pattern, line):
+                continue
+            
+            # Пропускаем строки с текстом (приветствия, имена визажистов и т.д.)
+            # Если строка не содержит цифр - пропускаем
+            if not any(c.isdigit() for c in line):
+                continue
+            
+            # Пытаемся распарсить как расход
+            match = re.match(expense_pattern, line, re.IGNORECASE)
+            if match:
+                code = match.group(1).strip()
+                name = match.group(2).strip()
+                amount = int(match.group(3))
+                
+                # Нормализуем код (латиница -> кириллица, верхний регистр)
+                code = normalize_code_cyrillic(code)
+                
+                # Нормализуем имя (первая буква заглавная)
+                name = name.capitalize()
+                
+                expenses.append({
+                    'code': code,
+                    'name': name,
+                    'amount': amount
+                })
+            else:
+                # Строка содержит цифры, но не подходит под паттерн
+                # Возможно, это ошибка ввода
+                if any(c.isdigit() for c in line) and len(line) > 2:
+                    errors.append(f"Не удалось распарсить строку: {line}")
+        
+        return date_from, date_to, expenses, errors
 

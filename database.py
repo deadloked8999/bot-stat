@@ -83,6 +83,20 @@ class Database:
             )
         """)
         
+        # Таблица расходов на стилистов
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stylist_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                club TEXT NOT NULL,
+                period_from TEXT NOT NULL,
+                period_to TEXT NOT NULL,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                amount REAL NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        
         # Индексы для быстрого поиска
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_operations_club_date 
@@ -815,4 +829,179 @@ class Database:
             print(f"Ошибка проверки объединения: {e}")
             conn.close()
             return None
+    
+    # ============ Методы для работы с расходами на стилистов ============
+    
+    def add_stylist_expense(self, club: str, period_from: str, period_to: str, 
+                           code: str, name: str, amount: float) -> bool:
+        """
+        Добавить расход на стилиста
+        
+        Args:
+            club: Клуб (Москвич/Анора)
+            period_from: Начало периода (YYYY-MM-DD)
+            period_to: Конец периода (YYYY-MM-DD)
+            code: Код сотрудника
+            name: Имя сотрудника
+            amount: Сумма расхода
+        
+        Returns:
+            True если успешно
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO stylist_expenses 
+                (club, period_from, period_to, code, name, amount, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (club, period_from, period_to, code, name, amount, 
+                  datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка добавления расхода на стилиста: {e}")
+            conn.rollback()
+            conn.close()
+            return False
+    
+    def get_stylist_expenses_for_period(self, club: str, date_from: str, date_to: str) -> List[Dict]:
+        """
+        Получить расходы на стилистов для периода с учетом пересечений
+        
+        Args:
+            club: Клуб
+            date_from: Начало периода отчета (YYYY-MM-DD)
+            date_to: Конец периода отчета (YYYY-MM-DD)
+        
+        Returns:
+            Список словарей с полями: code, name, total_amount
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Пересечение периодов: NOT (period_to < date_from OR period_from > date_to)
+            cursor.execute("""
+                SELECT code, name, SUM(amount) as total_amount
+                FROM stylist_expenses
+                WHERE club = ?
+                  AND NOT (period_to < ? OR period_from > ?)
+                GROUP BY code, name
+            """, (club, date_from, date_to))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'code': row[0],
+                    'name': row[1],
+                    'amount': row[2]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения расходов на стилистов: {e}")
+            conn.close()
+            return []
+    
+    def get_stylist_expenses_periods(self, club: str) -> List[Dict]:
+        """
+        Получить все периоды расходов на стилистов для клуба
+        
+        Returns:
+            Список словарей с полями: period_from, period_to, count, total_amount
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT period_from, period_to, COUNT(*) as count, SUM(amount) as total
+                FROM stylist_expenses
+                WHERE club = ?
+                GROUP BY period_from, period_to
+                ORDER BY period_from DESC
+            """, (club,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'period_from': row[0],
+                    'period_to': row[1],
+                    'count': row[2],
+                    'total_amount': row[3]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения периодов расходов: {e}")
+            conn.close()
+            return []
+    
+    def get_stylist_expenses_by_period(self, club: str, period_from: str, period_to: str) -> List[Dict]:
+        """
+        Получить детальный список расходов за конкретный период
+        
+        Returns:
+            Список словарей с полями: code, name, amount
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT code, name, amount
+                FROM stylist_expenses
+                WHERE club = ? AND period_from = ? AND period_to = ?
+                ORDER BY code, name
+            """, (club, period_from, period_to))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'code': row[0],
+                    'name': row[1],
+                    'amount': row[2]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения расходов по периоду: {e}")
+            conn.close()
+            return []
+    
+    def delete_stylist_expenses_by_period(self, club: str, period_from: str, period_to: str) -> int:
+        """
+        Удалить все расходы на стилистов за конкретный период
+        
+        Returns:
+            Количество удалённых записей
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                DELETE FROM stylist_expenses
+                WHERE club = ? AND period_from = ? AND period_to = ?
+            """, (club, period_from, period_to))
+            
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return deleted
+        except Exception as e:
+            print(f"Ошибка удаления расходов: {e}")
+            conn.rollback()
+            conn.close()
+            return 0
 

@@ -13,10 +13,12 @@ class ReportGenerator:
     """Генератор отчетов"""
     
     @staticmethod
-    def calculate_report(operations: List[Dict], sb_name_merges: Optional[Dict[str, str]] = None) -> Tuple[List[Dict], Dict, Dict, bool]:
+    def calculate_report(operations: List[Dict], sb_name_merges: Optional[Dict[str, str]] = None, 
+                        stylist_expenses: Optional[List[Dict]] = None) -> Tuple[List[Dict], Dict, Dict, bool]:
         """
         Расчет отчета по операциям
         sb_name_merges: словарь для объединения имен СБ {старое_имя: новое_имя}
+        stylist_expenses: список расходов на стилистов [{'code': 'Д14', 'name': 'Бритни', 'amount': 2000}, ...]
         Возвращает: (строки_отчета, итоги_по_строкам, итоги_пересчет, проверка_ок)
         """
         # Группируем по сотрудникам
@@ -24,7 +26,8 @@ class ReportGenerator:
         employee_data = defaultdict(lambda: {
             'names': set(),
             'nal': 0.0,
-            'beznal': 0.0
+            'beznal': 0.0,
+            'stylist': 0.0
         })
         
         # Пересчет для проверки
@@ -56,11 +59,38 @@ class ReportGenerator:
                 employee_data[group_key]['beznal'] += amount
                 total_beznal_raw += amount
         
+        # Добавляем расходы на стилистов
+        if stylist_expenses:
+            for expense in stylist_expenses:
+                exp_code = expense['code']
+                exp_name = expense['name']
+                exp_amount = expense['amount']
+                
+                # Ищем соответствующего сотрудника
+                # Для СБ не ищем (СБ не может иметь расходов на стилистов)
+                if exp_code == 'СБ':
+                    continue
+                
+                # Для обычных сотрудников ищем по коду
+                group_key = exp_code
+                
+                # Проверяем, есть ли такой сотрудник в данных
+                if group_key in employee_data:
+                    # Проверяем совпадение имени (для безопасности)
+                    names_in_data = list(employee_data[group_key]['names'])
+                    # Нормализуем имена для сравнения
+                    names_normalized = [n.lower().strip() for n in names_in_data]
+                    exp_name_normalized = exp_name.lower().strip()
+                    
+                    if exp_name_normalized in names_normalized or not names_in_data:
+                        employee_data[group_key]['stylist'] += exp_amount
+        
         # Формируем строки отчета
         report_rows = []
         total_nal = 0.0
         total_beznal = 0.0
         total_minus10 = 0.0
+        total_stylist = 0.0
         total_itog = 0.0
         
         for group_key in sorted(employee_data.keys()):
@@ -80,7 +110,8 @@ class ReportGenerator:
             nal = round(data['nal'], 2)
             beznal = round(data['beznal'], 2)
             minus10 = round(beznal * 0.10, 2)
-            itog = round(nal + (beznal - minus10), 2)
+            stylist = round(data['stylist'], 2)
+            itog = round(nal + (beznal - minus10) - stylist, 2)  # НОВАЯ ФОРМУЛА
             
             report_rows.append({
                 'name': name + name_comment,
@@ -88,12 +119,14 @@ class ReportGenerator:
                 'nal': nal,
                 'beznal': beznal,
                 'minus10': minus10,
+                'stylist': stylist,  # НОВОЕ ПОЛЕ
                 'itog': itog
             })
             
             total_nal += nal
             total_beznal += beznal
             total_minus10 += minus10
+            total_stylist += stylist
             total_itog += itog
         
         # Итоги по строкам
@@ -101,6 +134,7 @@ class ReportGenerator:
             'nal': round(total_nal, 2),
             'beznal': round(total_beznal, 2),
             'minus10': round(total_minus10, 2),
+            'stylist': round(total_stylist, 2),  # НОВОЕ ПОЛЕ
             'itog': round(total_itog, 2)
         }
         
@@ -241,8 +275,8 @@ class ReportGenerator:
         
         # Шапка таблицы
         headers = [
-            'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 
-            'Итог (нал + безнал − 10%)', 'Самозанятость', 'К выплате (самозанятый)'
+            'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 'Стилисты',
+            'Итог (нал + безнал − 10% − стилисты)', 'Самозанятость', 'К выплате (самозанятый)'
         ]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=4, column=col, value=header)
@@ -265,7 +299,7 @@ class ReportGenerator:
             cell.border = border
             
             # Числовые колонки (выравнивание вправо)
-            for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+            for col, key in enumerate(['nal', 'beznal', 'minus10', 'stylist', 'itog'], 3):
                 cell = ws.cell(row=row_num, column=col, value=row_data[key])
                 cell.alignment = Alignment(horizontal='right', vertical='center')
                 cell.border = border
@@ -275,23 +309,23 @@ class ReportGenerator:
                 normalized_code = row_data['code'].upper().strip()
                 is_self_employed = db.is_self_employed(normalized_code)
                 if is_self_employed:
-                    cell = ws.cell(row=row_num, column=7, value='✓')
+                    cell = ws.cell(row=row_num, column=8, value='✓')
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                     cell.border = border
                     
                     payout = round(row_data['itog'] / 0.94, 2)
-                    cell = ws.cell(row=row_num, column=8, value=payout)
+                    cell = ws.cell(row=row_num, column=9, value=payout)
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                     cell.border = border
                 else:
-                    cell = ws.cell(row=row_num, column=7, value='')
-                    cell.border = border
                     cell = ws.cell(row=row_num, column=8, value='')
                     cell.border = border
+                    cell = ws.cell(row=row_num, column=9, value='')
+                    cell.border = border
             else:
-                cell = ws.cell(row=row_num, column=7, value='')
-                cell.border = border
                 cell = ws.cell(row=row_num, column=8, value='')
+                cell.border = border
+                cell = ws.cell(row=row_num, column=9, value='')
                 cell.border = border
             
             row_num += 1
@@ -305,14 +339,14 @@ class ReportGenerator:
         cell = ws.cell(row=row_num, column=2, value='')
         cell.border = border
         
-        for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+        for col, key in enumerate(['nal', 'beznal', 'minus10', 'stylist', 'itog'], 3):
             cell = ws.cell(row=row_num, column=col, value=totals[key])
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='right', vertical='center')
             cell.border = border
         
         # Пустые ячейки в строке итогов
-        for col in [7, 8]:
+        for col in [8, 9]:
             cell = ws.cell(row=row_num, column=col, value='')
             cell.border = border
         
@@ -322,9 +356,10 @@ class ReportGenerator:
         ws.column_dimensions['C'].width = 12
         ws.column_dimensions['D'].width = 12
         ws.column_dimensions['E'].width = 15
-        ws.column_dimensions['F'].width = 25
-        ws.column_dimensions['G'].width = 15
-        ws.column_dimensions['H'].width = 25
+        ws.column_dimensions['F'].width = 12
+        ws.column_dimensions['G'].width = 30
+        ws.column_dimensions['H'].width = 15
+        ws.column_dimensions['I'].width = 25
         
         # Сохраняем
         wb.save(filename)
@@ -367,8 +402,8 @@ class ReportGenerator:
             
             # Шапка таблицы
             headers = [
-                'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 
-                'Итог (нал + безнал − 10%)', 'Самозанятость', 'К выплате (самозанятый)'
+                'Имя', 'Код', 'Нал', 'Безнал', '10% от безнала', 'Стилисты',
+                'Итог (нал + безнал − 10% − стилисты)', 'Самозанятость', 'К выплате (самозанятый)'
             ]
             for col, header in enumerate(headers, 1):
                 cell = ws.cell(row=4, column=col, value=header)
@@ -391,7 +426,7 @@ class ReportGenerator:
                 cell.border = border
                 
                 # Числовые колонки
-                for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+                for col, key in enumerate(['nal', 'beznal', 'minus10', 'stylist', 'itog'], 3):
                     cell = ws.cell(row=row_num, column=col, value=row_data[key])
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                     cell.border = border
@@ -401,23 +436,23 @@ class ReportGenerator:
                     normalized_code = row_data['code'].upper().strip()
                     is_self_employed = db.is_self_employed(normalized_code)
                     if is_self_employed:
-                        cell = ws.cell(row=row_num, column=7, value='✓')
+                        cell = ws.cell(row=row_num, column=8, value='✓')
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                         cell.border = border
                         
                         payout = round(row_data['itog'] / 0.94, 2)
-                        cell = ws.cell(row=row_num, column=8, value=payout)
+                        cell = ws.cell(row=row_num, column=9, value=payout)
                         cell.alignment = Alignment(horizontal='right', vertical='center')
                         cell.border = border
                     else:
-                        cell = ws.cell(row=row_num, column=7, value='')
-                        cell.border = border
                         cell = ws.cell(row=row_num, column=8, value='')
                         cell.border = border
+                        cell = ws.cell(row=row_num, column=9, value='')
+                        cell.border = border
                 else:
-                    cell = ws.cell(row=row_num, column=7, value='')
-                    cell.border = border
                     cell = ws.cell(row=row_num, column=8, value='')
+                    cell.border = border
+                    cell = ws.cell(row=row_num, column=9, value='')
                     cell.border = border
                 
                 row_num += 1
@@ -431,13 +466,13 @@ class ReportGenerator:
             cell = ws.cell(row=row_num, column=2, value='')
             cell.border = border
             
-            for col, key in enumerate(['nal', 'beznal', 'minus10', 'itog'], 3):
+            for col, key in enumerate(['nal', 'beznal', 'minus10', 'stylist', 'itog'], 3):
                 cell = ws.cell(row=row_num, column=col, value=totals[key])
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal='right', vertical='center')
                 cell.border = border
             
-            for col in [7, 8]:
+            for col in [8, 9]:
                 cell = ws.cell(row=row_num, column=col, value='')
                 cell.border = border
             
@@ -447,9 +482,10 @@ class ReportGenerator:
             ws.column_dimensions['C'].width = 12
             ws.column_dimensions['D'].width = 12
             ws.column_dimensions['E'].width = 15
-            ws.column_dimensions['F'].width = 25
-            ws.column_dimensions['G'].width = 15
-            ws.column_dimensions['H'].width = 25
+            ws.column_dimensions['F'].width = 12
+            ws.column_dimensions['G'].width = 30
+            ws.column_dimensions['H'].width = 15
+            ws.column_dimensions['I'].width = 25
         
         # Лист 1: Москвич
         ws1 = wb.active
