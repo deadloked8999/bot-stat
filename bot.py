@@ -1112,7 +1112,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка ввода для выплат (после кнопки)
     if state.mode == 'awaiting_payments_input':
         await handle_payments_command(update, context, state, text)
-        state.mode = None
+        # Для ограниченного доступа НЕ сбрасываем режим - оставляем в цикле
+        if not state.limited_access:
+            state.mode = None
         return
     
     # Команда "список"
