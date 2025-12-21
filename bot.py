@@ -60,6 +60,7 @@ class UserState:
         self.temp_nal_data: list = []
         self.temp_beznal_data: list = []
         self.current_date: str = get_current_date()
+        self.limited_access: bool = False  # Ограниченный доступ (только выплаты)
         
         # Для команды отчет
         self.report_club: Optional[str] = None
@@ -371,6 +372,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif text == "0001":
             # Быстрый доступ - авторизуем и сразу в выплаты
             AUTHORIZED_USERS.add(user_id)
+            state.limited_access = True  # Ограниченный доступ - только выплаты
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             
             keyboard = [[InlineKeyboardButton("❌ Выход", callback_data="quick_exit")]]
@@ -445,6 +447,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Используйте кнопки меню:",
                 reply_markup=get_main_keyboard()
             )
+            return
+    
+    # Проверка ограниченного доступа (пароль 0001)
+    # Список команд, доступных ТОЛЬКО при полном доступе
+    restricted_commands = [
+        'нал', 'безнал', 'готово', 'загрузить файл',
+        'отчет', 'список', 'экспорт', 
+        'исправить', 'удалить', 'обнулить',
+        'сотрудники', 'объединить', 'самозанятые', 'стилисты',
+        'помощь', 'старт москвич', 'старт анора'
+    ]
+    
+    # Проверяем режимы ввода данных
+    restricted_modes = [
+        'нал', 'безнал', 'awaiting_preview_date', 'awaiting_preview_action',
+        'awaiting_edit_line_number', 'awaiting_edit_line_data',
+        'awaiting_report_club', 'awaiting_report_period',
+        'awaiting_list_club', 'awaiting_list_date',
+        'awaiting_export_club', 'awaiting_export_period',
+        'awaiting_edit_params', 'awaiting_edit_data',
+        'awaiting_delete_choice', 'awaiting_delete_mass_club',
+        'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file',
+        'awaiting_stylist_period', 'awaiting_stylist_data',
+        'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm'
+    ]
+    
+    if state.limited_access:
+        # Проверяем команды
+        if text_lower in restricted_commands:
+            await update.message.reply_text(
+                "❌ Доступ запрещён\n\n"
+                "У вас ограниченный доступ.\n"
+                "Доступна только функция 'Выплаты'."
+            )
+            return
+        
+        # Проверяем режимы (если пользователь пытается что-то ввести в неразрешённом режиме)
+        if state.mode in restricted_modes:
+            await update.message.reply_text(
+                "❌ Доступ запрещён\n\n"
+                "У вас ограниченный доступ.\n"
+                "Доступна только функция 'Выплаты'."
+            )
+            state.mode = None  # Сбрасываем режим
             return
     
     if state.mode == 'awaiting_delete_mass_club':
@@ -3779,6 +3825,20 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     
     import os
     os.remove(filename)
+    
+    # Если ограниченный доступ - предлагаем повторить
+    if state.limited_access:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        keyboard = [[InlineKeyboardButton("❌ Выход", callback_data="quick_exit")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "✅ Готово!\n\n"
+            "💡 Введите данные для нового запроса:\n"
+            "Пример: Д7 12,12",
+            reply_markup=reply_markup
+        )
+        state.mode = 'awaiting_payments_input'
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3803,6 +3863,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if query.data == 'quick_exit':
         # Полная очистка состояния - сбрасываем все поля
         state.__init__()
+        # Удаляем из авторизованных пользователей
+        AUTHORIZED_USERS.discard(user_id)
         await query.edit_message_text(
             "❌ Сессия завершена\n\n"
             "Для начала работы введите /start"
