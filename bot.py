@@ -3556,12 +3556,11 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         )
         return
     
-    # Формируем ответ с группировкой по клубам
-    response = f"```\n"
-    response += f"{'='*60}\n"
-    response += f"  ВЫПЛАТЫ СОТРУДНИКУ {code}\n"
-    response += f"  Период: {date_from} .. {date_to}\n"
-    response += f"{'='*60}\n\n"
+    # Формируем текстовый файл
+    content = "=" * 60 + "\n"
+    content += f"{'ВЫПЛАТЫ СОТРУДНИКУ ' + code:^60}\n"
+    content += f"{'Период: ' + date_from + ' .. ' + date_to:^60}\n"
+    content += "=" * 60 + "\n\n"
     
     # Группируем по клубам
     from collections import defaultdict
@@ -3583,19 +3582,15 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     # Выводим по каждому клубу
     for club in sorted(by_club.keys()):
         data = by_club[club]
-        response += f"КЛУБ: {club}\n"
-        response += f"{'-'*60}\n"
-        response += f"{'Дата':<12} {'Канал':<8} {'Имя':<15} {'Сумма':>10}\n"
-        response += f"{'-'*60}\n"
+        content += f"\nКЛУБ: {club}\n"
+        content += "-" * 60 + "\n"
+        content += f"{'Дата':<13} | {'Канал':<7} | {'Имя':<15} | {'Сумма':>10}\n"
+        content += "-" * 60 + "\n"
         
         for payment in data['payments']:
-            if payment['channel'] == 'нал':
-                response += f"{payment['date']:<12} {'НАЛ':<8} {payment['name']:<15} {payment['amount']:>10.0f}\n"
-            else:
-                # БЕЗНАЛ - показываем полную сумму
-                response += f"{payment['date']:<12} {'БЕЗНАЛ':<8} {payment['name']:<15} {payment['amount']:>10.0f}\n"
+            content += f"{payment['date']:<13} | {payment['channel'].upper():<7} | {payment['name']:<15} | {payment['amount']:>10.0f}\n"
         
-        response += f"{'-'*60}\n"
+        content += "-" * 60 + "\n"
         
         # Итог по клубу
         club_nal = data['nal']
@@ -3603,31 +3598,47 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         club_minus10 = club_beznal * 0.1
         club_total = club_nal + (club_beznal - club_minus10)
         
-        response += f"{'НАЛ:':<30} {club_nal:>10.0f}\n"
-        response += f"{'БЕЗНАЛ:':<30} {club_beznal:>10.0f}\n"
-        response += f"{'10% от безнала:':<30} {club_minus10:>10.0f}\n"
-        response += f"{'ИТОГО к выплате:':<30} {club_total:>10.0f}\n"
-        response += f"\n"
+        content += "Итог по клубу:\n"
+        content += f"  НАЛ:                 {club_nal:>10.0f}\n"
+        content += f"  БЕЗНАЛ:              {club_beznal:>10.0f}\n"
+        content += f"  10% от безнала:      {club_minus10:>10.0f}\n"
+        content += f"  ИТОГО к выплате:     {club_total:>10.0f}\n"
+        content += "\n"
         
         total_nal += data['nal']
         total_beznal += data['beznal']
     
     # Общий итог по всем клубам
-    response += f"{'='*60}\n"
-    response += f"ИТОГО ПО ВСЕМ КЛУБАМ:\n"
-    response += f"{'='*60}\n"
+    content += "\n" + "=" * 60 + "\n"
+    content += f"{'ИТОГО ПО ВСЕМ КЛУБАМ':^60}\n"
+    content += "=" * 60 + "\n"
     
     total_minus10 = total_beznal * 0.1
     total_itog = total_nal + (total_beznal - total_minus10)
     
-    response += f"{'НАЛ:':<30} {total_nal:>10.0f}\n"
-    response += f"{'БЕЗНАЛ:':<30} {total_beznal:>10.0f}\n"
-    response += f"{'10% от безнала:':<30} {total_minus10:>10.0f}\n"
-    response += f"{'ИТОГО к выплате:':<30} {total_itog:>10.0f}\n"
-    response += f"{'='*60}\n"
-    response += "```"
+    content += f"НАЛ:                   {total_nal:>10.0f}\n"
+    content += f"БЕЗНАЛ:                {total_beznal:>10.0f}\n"
+    content += f"10% от безнала:        {total_minus10:>10.0f}\n"
+    content += "-" * 60 + "\n"
+    content += f"ИТОГО К ВЫПЛАТЕ:       {total_itog:>10.0f}\n"
+    content += "=" * 60 + "\n"
     
-    await update.message.reply_text(response, parse_mode='Markdown')
+    # Создаем файл
+    filename = f"vyplaty_{code}_{date_from}_{date_to}.txt"
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    # Отправляем файл
+    with open(filename, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=filename,
+            caption=f"💰 Выплаты сотруднику {code}\nПериод: {date_from} .. {date_to}"
+        )
+    
+    # Удаляем временный файл
+    import os
+    os.remove(filename)
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
