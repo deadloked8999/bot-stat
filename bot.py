@@ -298,6 +298,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     state = get_user_state(user_id)
     
+    # Блокируем /start для ограниченного доступа
+    if state.limited_access:
+        await update.message.reply_text(
+            "❌ Доступ запрещён\n\n"
+            "У вас ограниченный доступ.\n"
+            "Доступна только функция 'Выплаты'."
+        )
+        return
+    
     # Получаем текст команды
     if update.message:
         text = update.message.text.lower()
@@ -414,6 +423,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         
         if state.mode in cancelable_modes or state.has_data():
+            # Если ограниченный доступ - выходим полностью
+            if state.limited_access:
+                state.__init__()
+                AUTHORIZED_USERS.discard(user_id)
+                await update.message.reply_text(
+                    "❌ Сессия завершена\n\n"
+                    "Для начала работы введите /start"
+                )
+                return
+            
             # Полная очистка (но клуб остаётся!)
             saved_club = state.club  # Сохраняем клуб
             state.reset_input()
