@@ -567,22 +567,24 @@ class ReportGenerator:
                     cell = ws4.cell(row=row_num, column=4, value='')
                     cell.border = border
                     
-                    # Ищем этот код в Анора
+                    # Ищем этот код в Анора и берем К ВЫПЛАТЕ
                     vozn_anora = 0
                     for row_a in report_anora[0]:
                         if row_a['code'] == code:
-                            vozn_anora = row_a['itog']
+                            # К выплате = итого / 0.94
+                            vozn_anora = round(row_a['itog'] / 0.94, 2)
                             break
                     
                     cell = ws4.cell(row=row_num, column=5, value=vozn_anora)
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                     cell.border = border
                     
-                    # Ищем этот код в Москвиче
+                    # Ищем этот код в Москвиче и берем К ВЫПЛАТЕ
                     vozn_moskvich = 0
                     for row_m in report_moskvich[0]:
                         if row_m['code'] == code:
-                            vozn_moskvich = row_m['itog']
+                            # К выплате = итого / 0.94
+                            vozn_moskvich = round(row_m['itog'] / 0.94, 2)
                             break
                     
                     cell = ws4.cell(row=row_num, column=6, value=vozn_moskvich)
