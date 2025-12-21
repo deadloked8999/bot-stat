@@ -3556,12 +3556,6 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         )
         return
     
-    # Формируем текстовый файл
-    content = "=" * 70 + "\n"
-    content += f"{'ВЫПЛАТЫ СОТРУДНИКУ ' + code:^70}\n"
-    content += f"{'Период: ' + date_from + ' .. ' + date_to:^70}\n"
-    content += "=" * 70 + "\n\n"
-    
     # Группируем по клубам и датам
     from collections import defaultdict
     by_club = defaultdict(lambda: {'nal': 0, 'beznal': 0, 'by_date': defaultdict(lambda: {'nal': 0, 'beznal': 0})})
@@ -3579,6 +3573,32 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
             by_club[club]['by_date'][date]['beznal'] += amount
             by_club[club]['beznal'] += amount
     
+    # Создаем Excel файл
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Выплаты"
+    
+    # Стили
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Заголовок
+    ws['A1'] = f"Выплаты сотруднику {code}"
+    ws['A1'].font = Font(bold=True, size=14)
+    ws['A2'] = f"Период: {date_from} .. {date_to}"
+    ws['A2'].font = Font(size=11)
+    
+    row_num = 4
+    
     # Общие итоги
     total_nal = 0
     total_beznal = 0
@@ -3586,12 +3606,23 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     # Выводим по каждому клубу
     for club in sorted(by_club.keys()):
         data = by_club[club]
-        content += f"\nКЛУБ: {club}\n"
-        content += "-" * 70 + "\n"
-        content += f"{'Дата':<10} | {'НАЛ':>10} | {'БЕЗНАЛ':>10} | {'10%':>10} | {'ИТОГО':>10}\n"
-        content += "-" * 70 + "\n"
         
-        # Сортируем даты
+        # Заголовок клуба
+        ws.cell(row=row_num, column=1, value=f"Клуб: {club}")
+        ws.cell(row=row_num, column=1).font = Font(bold=True, size=12)
+        row_num += 1
+        
+        # Шапка таблицы
+        headers = ['Дата', 'НАЛ', 'БЕЗНАЛ', '10%', 'ИТОГО']
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=row_num, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
+        row_num += 1
+        
+        # Данные по датам
         for date in sorted(data['by_date'].keys()):
             date_data = data['by_date'][date]
             nal_sum = date_data['nal']
@@ -3606,9 +3637,32 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
             except:
                 date_short = date
             
-            content += f"{date_short:<10} | {nal_sum:>10.0f} | {beznal_sum:>10.0f} | {minus10:>10.0f} | {itog:>10.0f}\n"
-        
-        content += "-" * 70 + "\n"
+            # Дата
+            cell = ws.cell(row=row_num, column=1, value=date_short)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
+            
+            # НАЛ
+            cell = ws.cell(row=row_num, column=2, value=nal_sum)
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+            cell.border = border
+            
+            # БЕЗНАЛ
+            cell = ws.cell(row=row_num, column=3, value=beznal_sum)
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+            cell.border = border
+            
+            # 10%
+            cell = ws.cell(row=row_num, column=4, value=minus10)
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+            cell.border = border
+            
+            # ИТОГО
+            cell = ws.cell(row=row_num, column=5, value=itog)
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+            cell.border = border
+            
+            row_num += 1
         
         # Итог по клубу
         club_nal = data['nal']
@@ -3616,37 +3670,84 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         club_minus10 = club_beznal * 0.1
         club_total = club_nal + (club_beznal - club_minus10)
         
-        content += "ИТОГО ПО КЛУБУ:\n"
-        content += f"  НАЛ:                                           {club_nal:>15.0f}\n"
-        content += f"  БЕЗНАЛ:                                        {club_beznal:>15.0f}\n"
-        content += f"  10% от безнала:                                {club_minus10:>15.0f}\n"
-        content += f"  К ВЫПЛАТЕ:                                     {club_total:>15.0f}\n"
-        content += "\n"
+        cell = ws.cell(row=row_num, column=1, value='ИТОГО ПО КЛУБУ')
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        cell.border = border
         
-        total_nal += data['nal']
-        total_beznal += data['beznal']
+        cell = ws.cell(row=row_num, column=2, value=club_nal)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='right', vertical='center')
+        cell.border = border
+        
+        cell = ws.cell(row=row_num, column=3, value=club_beznal)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='right', vertical='center')
+        cell.border = border
+        
+        cell = ws.cell(row=row_num, column=4, value=club_minus10)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='right', vertical='center')
+        cell.border = border
+        
+        cell = ws.cell(row=row_num, column=5, value=club_total)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='right', vertical='center')
+        cell.border = border
+        
+        row_num += 2  # Пропускаем строку
+        
+        total_nal += club_nal
+        total_beznal += club_beznal
     
-    # Общий итог по всем клубам
-    content += "\n" + "=" * 70 + "\n"
-    content += f"{'ИТОГО ПО ВСЕМ КЛУБАМ':^70}\n"
-    content += "=" * 70 + "\n"
-    
+    # Общий итог
     total_minus10 = total_beznal * 0.1
     total_itog = total_nal + (total_beznal - total_minus10)
     
-    content += f"НАЛ:                                             {total_nal:>15.0f}\n"
-    content += f"БЕЗНАЛ:                                          {total_beznal:>15.0f}\n"
-    content += f"10% от безнала:                                  {total_minus10:>15.0f}\n"
-    content += "-" * 70 + "\n"
-    content += f"ИТОГО К ВЫПЛАТЕ:                                 {total_itog:>15.0f}\n"
-    content += "=" * 70 + "\n"
+    cell = ws.cell(row=row_num, column=1, value='ИТОГО ПО ВСЕМ КЛУБАМ')
+    cell.font = Font(bold=True, size=12)
+    cell.alignment = Alignment(horizontal='left', vertical='center')
+    cell.border = border
     
-    # Создаем файл
-    filename = f"vyplaty_{code}_{date_from}_{date_to}.txt"
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write(content)
+    cell = ws.cell(row=row_num, column=2, value=total_nal)
+    cell.font = Font(bold=True)
+    cell.alignment = Alignment(horizontal='right', vertical='center')
+    cell.border = border
     
-    # Отправляем файл
+    cell = ws.cell(row=row_num, column=3, value=total_beznal)
+    cell.font = Font(bold=True)
+    cell.alignment = Alignment(horizontal='right', vertical='center')
+    cell.border = border
+    
+    cell = ws.cell(row=row_num, column=4, value=total_minus10)
+    cell.font = Font(bold=True)
+    cell.alignment = Alignment(horizontal='right', vertical='center')
+    cell.border = border
+    
+    cell = ws.cell(row=row_num, column=5, value=total_itog)
+    cell.font = Font(bold=True)
+    cell.alignment = Alignment(horizontal='right', vertical='center')
+    cell.border = border
+    
+    # Автоподгонка ширины столбцов
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if cell.value:
+                    cell_length = len(str(cell.value))
+                    if cell_length > max_length:
+                        max_length = cell_length
+            except:
+                pass
+        adjusted_width = max_length + 2
+        ws.column_dimensions[column_letter].width = adjusted_width
+    
+    # Сохраняем и отправляем
+    filename = f"vyplaty_{code}_{date_from}_{date_to}.xlsx"
+    wb.save(filename)
+    
     with open(filename, 'rb') as f:
         await update.message.reply_document(
             document=f,
@@ -3654,7 +3755,6 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
             caption=f"💰 Выплаты сотруднику {code}\nПериод: {date_from} .. {date_to}"
         )
     
-    # Удаляем временный файл
     import os
     os.remove(filename)
 
