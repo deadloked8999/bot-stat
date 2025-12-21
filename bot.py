@@ -371,6 +371,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
         return
     
+    # Быстрый доступ по паролю 0001 - сразу в Выплаты
+    if text == "0001":
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        keyboard = [[InlineKeyboardButton("❌ Выход", callback_data="quick_exit")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "🔐 Быстрый доступ к выплатам\n\n"
+            "📋 Инструкция:\n"
+            "1️⃣ Введите код сотрудника и период\n"
+            "2️⃣ Получите Excel файл с выплатами\n\n"
+            "📝 Примеры:\n"
+            "• Д7 12,12\n"
+            "• Д7 10,06-11,08\n\n"
+            "💡 Введите данные:",
+            reply_markup=reply_markup
+        )
+        state.mode = 'awaiting_payments_input'
+        return
+    
     # УНИВЕРСАЛЬНАЯ КНОПКА ОТМЕНА - работает на ЛЮБОМ этапе!
     # Проверяем ПЕРЕД всеми режимами
     if text_lower == 'отмена' or text_lower == '❌ отмена':
@@ -3776,6 +3797,16 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     await query.answer()
     state = get_user_state(user_id)
+    
+    # Кнопка "Выход" из быстрого доступа
+    if query.data == 'quick_exit':
+        # Полная очистка состояния - сбрасываем все поля
+        state.__init__()
+        await query.edit_message_text(
+            "❌ Сессия завершена\n\n"
+            "Для начала работы введите /start"
+        )
+        return
     
     # Выбор клуба при старте
     if query.data == 'club_moskvich':
