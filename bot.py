@@ -814,6 +814,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state.mode = 'awaiting_upload_club'
         return
     
+    # Обработка ввода периода для расходов на стилистов
+    if state.mode == 'awaiting_stylist_period':
+        # Парсим период
+        if '-' in text:
+            success, date_from, date_to, error = parse_date_range(text)
+            if not success:
+                await update.message.reply_text(f"❌ {error}\n\n❌ Для отмены напишите: ОТМЕНА")
+                return
+        else:
+            success, single_date, error = parse_short_date(text)
+            if not success:
+                await update.message.reply_text(f"❌ {error}\n\n❌ Для отмены напишите: ОТМЕНА")
+                return
+            date_from = single_date
+            date_to = single_date
+        
+        # Сохраняем период
+        state.stylist_period_from = date_from
+        state.stylist_period_to = date_to
+        state.stylist_expenses = []  # Инициализируем пустой список
+        state.stylist_errors = []
+        state.mode = 'awaiting_stylist_data'
+        
+        # Создаем inline кнопку ГОТОВО
+        keyboard = [[InlineKeyboardButton("✅ ГОТОВО", callback_data='stylist_done')]]
+        
+        await update.message.reply_text(
+            f"✅ ПЕРИОД: {date_from} - {date_to}\n\n"
+            f"💄 Отправьте данные о расходах.\n\n"
+            f"Формат:\n"
+            f"Д14Бритни 2000\n"
+            f"А13Варя 1500\n"
+            f"Н3Влада 2500\n\n"
+            f"📝 Можете отправлять НЕСКОЛЬКО сообщений.\n"
+            f"После завершения нажмите: ГОТОВО",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    # Обработка ввода данных стилистов (накопление из нескольких сообщений)
+    if state.mode == 'awaiting_stylist_data':
+        await handle_stylist_data_input(update, state, text, text_lower)
+        return
+    
+    # Обработка подтверждения сохранения расходов на стилистов
+    if state.mode == 'awaiting_stylist_confirm':
+        await handle_stylist_confirm(update, state, text_lower)
+        return
+    
+    # Обработка ввода номера для редактирования расхода на стилиста
+    if state.mode == 'awaiting_stylist_edit_number':
+        await handle_stylist_edit_number(update, state, text)
+        return
+    
+    # Обработка ввода новых данных для расхода на стилиста
+    if state.mode == 'awaiting_stylist_edit_data':
+        await handle_stylist_edit_data(update, state, text)
+        return
+    
+    # Обработка уточнений для расходов на стилистов (выбор имени)
+    if state.mode == 'awaiting_stylist_clarification':
+        await handle_stylist_clarification(update, state, text)
+        return
+    
     # Команда "готово"
     if text_lower == 'готово':
         if not state.has_data():
@@ -1087,67 +1151,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Выберите действие:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        return
-    
-    # Обработка ввода периода для расходов на стилистов
-    if state.mode == 'awaiting_stylist_period':
-        # Парсим период
-        if '-' in text:
-            success, date_from, date_to, error = parse_date_range(text)
-            if not success:
-                await update.message.reply_text(f"❌ {error}\n\n❌ Для отмены напишите: ОТМЕНА")
-                return
-        else:
-            success, single_date, error = parse_short_date(text)
-            if not success:
-                await update.message.reply_text(f"❌ {error}\n\n❌ Для отмены напишите: ОТМЕНА")
-                return
-            date_from = single_date
-            date_to = single_date
-        
-        # Сохраняем период
-        state.stylist_period_from = date_from
-        state.stylist_period_to = date_to
-        state.stylist_expenses = []  # Инициализируем пустой список
-        state.stylist_errors = []
-        state.mode = 'awaiting_stylist_data'
-        
-        await update.message.reply_text(
-            f"✅ ПЕРИОД: {date_from} - {date_to}\n\n"
-            f"💄 Отправьте данные о расходах.\n\n"
-            f"Формат:\n"
-            f"Д14Бритни 2000\n"
-            f"А13Варя 1500\n"
-            f"Н3Влада 2500\n\n"
-            f"📝 Можете отправлять НЕСКОЛЬКО сообщений.\n"
-            f"После завершения нажмите: ГОТОВО",
-            reply_markup=get_main_keyboard()
-        )
-        return
-    
-    # Обработка ввода данных стилистов (накопление из нескольких сообщений)
-    if state.mode == 'awaiting_stylist_data':
-        await handle_stylist_data_input(update, state, text, text_lower)
-        return
-    
-    # Обработка подтверждения сохранения расходов на стилистов
-    if state.mode == 'awaiting_stylist_confirm':
-        await handle_stylist_confirm(update, state, text_lower)
-        return
-    
-    # Обработка ввода номера для редактирования расхода на стилиста
-    if state.mode == 'awaiting_stylist_edit_number':
-        await handle_stylist_edit_number(update, state, text)
-        return
-    
-    # Обработка ввода новых данных для расхода на стилиста
-    if state.mode == 'awaiting_stylist_edit_data':
-        await handle_stylist_edit_data(update, state, text)
-        return
-    
-    # Обработка уточнений для расходов на стилистов (выбор имени)
-    if state.mode == 'awaiting_stylist_clarification':
-        await handle_stylist_clarification(update, state, text)
         return
     
     # Обработка режима добавления самозанятого
@@ -3696,6 +3699,42 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"❌ Для отмены напишите: ОТМЕНА"
         )
     
+    elif query.data == 'stylist_done':
+        # Кнопка ГОТОВО для стилистов
+        user_id = update.effective_user.id
+        state = get_user_state(user_id)
+        
+        if state.mode != 'awaiting_stylist_data':
+            await query.answer("⚠️ Режим ввода данных стилистов не активен", show_alert=True)
+            return
+        
+        if not state.stylist_expenses or len(state.stylist_expenses) == 0:
+            await query.answer("❌ Нет данных для сохранения!", show_alert=True)
+            return
+        
+        # Проверяем, есть ли записи требующие уточнения имени
+        needs_clarification = [
+            exp for exp in state.stylist_expenses 
+            if exp.get('needs_selection') or exp.get('needs_input')
+        ]
+        
+        if needs_clarification:
+            # Есть записи требующие уточнения - запускаем процесс
+            state.stylist_clarification_queue = needs_clarification
+            state.stylist_clarification_index = 0
+            state.mode = 'awaiting_stylist_clarification'
+            
+            await query.answer()
+            await query.message.reply_text("⏳ Требуется уточнение информации...")
+            # Задаем первый вопрос
+            await ask_next_clarification_query(query, state)
+        else:
+            # Все ОК, показываем предпросмотр
+            await query.answer()
+            await show_stylist_preview_query(query, state)
+            state.mode = 'awaiting_stylist_confirm'
+        return
+    
     elif query.data == 'stylist_view':
         # Просмотр расходов на стилистов
         keyboard = [
@@ -4402,6 +4441,63 @@ async def ask_next_clarification(update: Update, state: UserState):
         msg += f"Это новый сотрудник?\n"
         msg += f"Введите имя для кода {exp['code']}:"
         await update.message.reply_text(msg)
+
+
+async def ask_next_clarification_query(query, state: UserState):
+    """Задать следующий вопрос для уточнения имени сотрудника (через query)"""
+    exp = state.stylist_clarification_queue[state.stylist_clarification_index]
+    
+    if exp.get('needs_selection'):
+        # Несколько имен в БД - нужен выбор
+        msg = f"⚠️ КОД {exp['code']} ИМЕЕТ НЕСКОЛЬКО ИМЕН В БАЗЕ:\n\n"
+        for i, name in enumerate(exp['available_names'], 1):
+            msg += f"{i}. {name}\n"
+        msg += f"\nПод каким именем сохранить расход {exp['amount']}₽?\n"
+        msg += "Введите номер:"
+        await query.message.reply_text(msg)
+    
+    elif exp.get('needs_input'):
+        # Новый код - нужен ввод имени
+        msg = f"❓ КОД {exp['code']} НЕ НАЙДЕН В БАЗЕ\n\n"
+        msg += f"Это новый сотрудник?\n"
+        msg += f"Введите имя для кода {exp['code']}:"
+        await query.message.reply_text(msg)
+
+
+async def show_stylist_preview_query(query, state: UserState):
+    """Показать предпросмотр расходов на стилистов с нумерацией (через query)"""
+    preview = f"📎 ПРЕДПРОСМОТР РАСХОДОВ НА СТИЛИСТОВ\n\n"
+    preview += f"🏢 Клуб: {state.stylist_club}\n"
+    preview += f"📅 Период: {state.stylist_period_from} - {state.stylist_period_to}\n\n"
+    preview += f"№  | {'Код':<8} | {'Имя':<15} | Сумма\n"
+    preview += "-" * 45 + "\n"
+    
+    total = 0
+    for i, exp in enumerate(state.stylist_expenses[:50], 1):  # Показываем первые 50
+        preview += f"{i:<2} | {exp['code']:<8} | {exp['name']:<15} | {exp['amount']}₽\n"
+        total += exp['amount']
+    
+    if len(state.stylist_expenses) > 50:
+        preview += f"... и ещё {len(state.stylist_expenses) - 50} записей\n"
+        # Считаем полную сумму
+        total = sum(exp['amount'] for exp in state.stylist_expenses)
+    
+    preview += "-" * 45 + "\n"
+    preview += f"Всего: {len(state.stylist_expenses)} расходов на сумму {total}₽\n"
+    
+    if state.stylist_errors:
+        preview += f"\n⚠️ Всего предупреждений: {len(state.stylist_errors)}\n"
+        for error in state.stylist_errors[:3]:
+            preview += f"• {error}\n"
+        if len(state.stylist_errors) > 3:
+            preview += f"... и ещё {len(state.stylist_errors) - 3}\n"
+    
+    preview += "\n✅ Всё верно? Введите:\n"
+    preview += "• ЗАПИСАТЬ - сохранить в базу\n"
+    preview += "• ИСПРАВИТЬ [номер] - редактировать запись\n"
+    preview += "• ОТМЕНА - отменить"
+    
+    await query.message.reply_text(preview)
 
 
 async def handle_stylist_clarification(update: Update, state: UserState, text: str):
