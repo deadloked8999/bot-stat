@@ -4295,9 +4295,51 @@ async def handle_stylist_data_input(update: Update, state: UserState, text: str,
 
 async def show_stylist_preview(update: Update, state: UserState):
     """Показать предпросмотр расходов на стилистов с нумерацией"""
+    # Проверяем какие коды не найдены в operations
+    suspicious = []
+    for i, exp in enumerate(state.stylist_expenses, 1):
+        # Ищем код в operations для этого клуба
+        ops = db.get_operations_by_period(
+            state.stylist_club,
+            state.stylist_period_from,
+            state.stylist_period_to
+        )
+        codes_in_ops = set(op['code'] for op in ops)
+        
+        if exp['code'] not in codes_in_ops:
+            # Ищем похожие коды
+            similar = []
+            exp_code_lower = exp['code'].lower()
+            for code in codes_in_ops:
+                if code.lower() in exp_code_lower or exp_code_lower in code.lower():
+                    similar.append(code)
+            
+            suspicious.append({
+                'index': i,
+                'code': exp['code'],
+                'name': exp['name'],
+                'amount': exp['amount'],
+                'similar': similar[:3]  # Максимум 3 похожих
+            })
+    
     preview = f"📎 ПРЕДПРОСМОТР РАСХОДОВ НА СТИЛИСТОВ\n\n"
     preview += f"🏢 Клуб: {state.stylist_club}\n"
     preview += f"📅 Период: {state.stylist_period_from} - {state.stylist_period_to}\n\n"
+    
+    # Если есть сомнительные - показываем предупреждение
+    if suspicious:
+        preview += "⚠️ ВНИМАНИЕ! Коды НЕ НАЙДЕНЫ в операциях:\n\n"
+        for susp in suspicious[:5]:  # Показываем первые 5
+            preview += f"{susp['index']}. {susp['code']} {susp['name']} {susp['amount']}₽\n"
+            if susp['similar']:
+                preview += f"   Похожие: {', '.join(susp['similar'])}\n"
+        
+        if len(suspicious) > 5:
+            preview += f"... и ещё {len(suspicious) - 5}\n"
+        
+        preview += f"\nНе найдено: {len(suspicious)} из {len(state.stylist_expenses)}\n"
+        preview += "-" * 45 + "\n\n"
+    
     preview += f"№  | {'Код':<8} | {'Имя':<15} | Сумма\n"
     preview += "-" * 45 + "\n"
     
@@ -4321,8 +4363,8 @@ async def show_stylist_preview(update: Update, state: UserState):
         if len(state.stylist_errors) > 3:
             preview += f"... и ещё {len(state.stylist_errors) - 3}\n"
     
-    preview += "\n✅ Всё верно? Введите:\n"
-    preview += "• ЗАПИСАТЬ - сохранить в базу\n"
+    preview += "\n✅ Что делать?\n"
+    preview += "• ЗАПИСАТЬ - сохранить как есть\n"
     preview += "• ИСПРАВИТЬ [номер] - редактировать запись\n"
     preview += "• ОТМЕНА - отменить"
     

@@ -1,0 +1,8 @@
+Выполните на сервере для объединения ЛМСТ8 → ЛМ8:
+
+sqlite3 bot_data.db "UPDATE stylist_expenses SET code = 'ЛМ8', name = 'Лиза' WHERE code = 'ЛМСТ8';"
+
+systemctl restart telegram-bot
+
+Это обновит код ЛМСТ8 на ЛМ8 и теперь 500₽ попадут в отчет.
+
