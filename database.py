@@ -1004,4 +1004,35 @@ class Database:
             conn.rollback()
             conn.close()
             return 0
+    
+    def get_employee_names_by_code(self, club: str, code: str) -> List[str]:
+        """
+        Получить все уникальные имена для кода в клубе
+        
+        Args:
+            club: Клуб (Москвич/Анора)
+            code: Код сотрудника (например, Д13)
+        
+        Returns:
+            Список уникальных имен: ['Варя'] или ['Катя', 'Лена'] или []
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT DISTINCT name_snapshot
+                FROM operations
+                WHERE club = ? AND code = ? AND name_snapshot != ''
+                ORDER BY name_snapshot
+            """, (club, code))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [row[0] for row in rows if row[0]]
+        except Exception as e:
+            print(f"Ошибка получения имен сотрудника: {e}")
+            conn.close()
+            return []
 

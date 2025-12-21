@@ -528,9 +528,8 @@ class DataParser:
         Парсинг данных о расходах на стилистов
         
         Формат входных данных (БЕЗ периода):
-        Д14Бритни 2000
-        А13Варя 1500
-        Н5 деля 1500
+        Вариант 1: Д14Бритни 2000
+        Вариант 2: Д14 - 2000 (без имени, будет искаться в БД)
         
         Args:
             text: Текст с данными о расходах (без периода)
@@ -538,15 +537,18 @@ class DataParser:
         Returns:
             (expenses_list, errors)
             expenses_list: [{'code': 'Д14', 'name': 'Бритни', 'amount': 2000}, ...]
+            name может быть None, если имя не указано
             errors: список строк с ошибками
         """
         lines = text.strip().split('\n')
         expenses = []
         errors = []
         
-        # Паттерн для расхода: КОД (буквы+цифры) + ИМЯ (буквы) + СУММА (цифры)
-        # Учитываем возможные пробелы между кодом и именем
-        expense_pattern = r'^([А-ЯЁA-Z]+\d+)\s*([А-ЯЁа-яёA-Za-z]+)\s+(\d+)$'
+        # Паттерн 1: КОД + ИМЯ + СУММА (Д14Бритни 2000)
+        expense_pattern_full = r'^([А-ЯЁA-Z]+\d+)\s*([А-ЯЁа-яёA-Za-z]+)\s+(\d+)$'
+        
+        # Паттерн 2: КОД + СУММА (Д14 - 500 или Д14 500)
+        expense_pattern_code_only = r'^([А-ЯЁA-Z]+\d+)\s*-?\s*(\d+)$'
         
         # Карта латинских букв на кириллические
         latin_to_cyrillic = {
@@ -577,8 +579,8 @@ class DataParser:
             if not any(c.isdigit() for c in line):
                 continue
             
-            # Пытаемся распарсить как расход
-            match = re.match(expense_pattern, line, re.IGNORECASE)
+            # Сначала пробуем паттерн с именем
+            match = re.match(expense_pattern_full, line, re.IGNORECASE)
             if match:
                 code = match.group(1).strip()
                 name = match.group(2).strip()
@@ -595,11 +597,27 @@ class DataParser:
                     'name': name,
                     'amount': amount
                 })
-            else:
-                # Строка содержит цифры, но не подходит под паттерн
-                # Возможно, это ошибка ввода
-                if any(c.isdigit() for c in line) and len(line) > 2:
-                    errors.append(f"Не удалось распарсить строку: {line}")
+                continue
+            
+            # Пробуем паттерн без имени
+            match = re.match(expense_pattern_code_only, line, re.IGNORECASE)
+            if match:
+                code = match.group(1).strip()
+                amount = int(match.group(2))
+                
+                # Нормализуем код (латиница -> кириллица, верхний регистр)
+                code = normalize_code_cyrillic(code)
+                
+                expenses.append({
+                    'code': code,
+                    'name': None,  # Имя будет искаться в БД
+                    'amount': amount
+                })
+                continue
+            
+            # Если ни один паттерн не подошел
+            if any(c.isdigit() for c in line) and len(line) > 2:
+                errors.append(f"Не удалось распарсить строку: {line}")
         
         return expenses, errors
 

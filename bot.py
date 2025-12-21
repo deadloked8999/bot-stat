@@ -121,6 +121,8 @@ class UserState:
         self.stylist_expenses: Optional[list] = None
         self.stylist_errors: Optional[list] = None
         self.stylist_edit_index: Optional[int] = None  # Индекс редактируемой записи
+        self.stylist_clarification_queue: Optional[list] = None  # Очередь записей требующих уточнения
+        self.stylist_clarification_index: Optional[int] = None  # Текущий индекс в очереди
         
         # ID сообщений бота для удаления
         self.bot_messages: list = []
@@ -378,7 +380,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_delete_employee_input',
             'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file', 'awaiting_upload_confirm',
             'awaiting_stylist_period', 'awaiting_stylist_data', 'awaiting_stylist_confirm', 
-            'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data',
+            'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data', 'awaiting_stylist_clarification',
             'нал', 'безнал'
         ]
         
@@ -1141,6 +1143,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка ввода новых данных для расхода на стилиста
     if state.mode == 'awaiting_stylist_edit_data':
         await handle_stylist_edit_data(update, state, text)
+        return
+    
+    # Обработка уточнений для расходов на стилистов (выбор имени)
+    if state.mode == 'awaiting_stylist_clarification':
+        await handle_stylist_clarification(update, state, text)
         return
     
     # Обработка режима добавления самозанятого
@@ -4133,9 +4140,24 @@ async def handle_stylist_data_input(update: Update, state: UserState, text: str,
             )
             return
         
-        # Показываем предпросмотр с возможностью редактирования
-        await show_stylist_preview(update, state)
-        state.mode = 'awaiting_stylist_confirm'
+        # Проверяем, есть ли записи требующие уточнения имени
+        needs_clarification = [
+            exp for exp in state.stylist_expenses 
+            if exp.get('needs_selection') or exp.get('needs_input')
+        ]
+        
+        if needs_clarification:
+            # Есть записи требующие уточнения - запускаем процесс
+            state.stylist_clarification_queue = needs_clarification
+            state.stylist_clarification_index = 0
+            state.mode = 'awaiting_stylist_clarification'
+            
+            # Задаем первый вопрос
+            await ask_next_clarification(update, state)
+        else:
+            # Все ОК, показываем предпросмотр
+            await show_stylist_preview(update, state)
+            state.mode = 'awaiting_stylist_confirm'
         return
     
     # Парсим данные из текущего сообщения
@@ -4145,10 +4167,32 @@ async def handle_stylist_data_input(update: Update, state: UserState, text: str,
         await update.message.reply_text(
             "❌ Не найдено ни одной записи о расходах в этом сообщении!\n\n"
             "Проверьте формат данных.\n"
-            "Формат: Д14Бритни 2000\n\n"
+            "Формат: Д14Бритни 2000 или Д14 - 500\n\n"
             "После завершения нажмите: ГОТОВО"
         )
         return
+    
+    # Для каждого расхода БЕЗ имени ищем в БД
+    for exp in expenses:
+        if exp['name'] is None or exp['name'] == '':
+            # Ищем имена в БД по клубу и коду
+            names = db.get_employee_names_by_code(state.stylist_club, exp['code'])
+            
+            if len(names) == 1:
+                # ✅ Одно имя - автоматически заполняем
+                exp['name'] = names[0]
+                exp['auto_filled'] = True
+            
+            elif len(names) > 1:
+                # ⚠️ Несколько имен - нужен выбор
+                exp['needs_selection'] = True
+                exp['available_names'] = names
+                exp['name'] = None  # Пока пусто
+            
+            else:  # len(names) == 0
+                # ❓ Новый код - нужен ввод имени
+                exp['needs_input'] = True
+                exp['name'] = None  # Пока пусто
     
     # Добавляем распарсенные расходы к уже существующим
     if state.stylist_expenses is None:
@@ -4160,7 +4204,14 @@ async def handle_stylist_data_input(update: Update, state: UserState, text: str,
     state.stylist_errors.extend(errors)
     
     # Подтверждаем добавление
+    auto_filled_count = len([e for e in expenses if e.get('auto_filled')])
+    needs_clarif_count = len([e for e in expenses if e.get('needs_selection') or e.get('needs_input')])
+    
     msg = f"✅ Добавлено записей: {len(expenses)}\n"
+    if auto_filled_count > 0:
+        msg += f"   • Имена заполнены автоматически: {auto_filled_count}\n"
+    if needs_clarif_count > 0:
+        msg += f"   • Требуют уточнения: {needs_clarif_count}\n"
     msg += f"📝 Всего накоплено: {len(state.stylist_expenses)}\n"
     
     if errors:
@@ -4330,6 +4381,77 @@ async def handle_stylist_edit_data(update: Update, state: UserState, text: str):
     await show_stylist_preview(update, state)
     state.mode = 'awaiting_stylist_confirm'
     state.stylist_edit_index = None
+
+
+async def ask_next_clarification(update: Update, state: UserState):
+    """Задать следующий вопрос для уточнения имени сотрудника"""
+    exp = state.stylist_clarification_queue[state.stylist_clarification_index]
+    
+    if exp.get('needs_selection'):
+        # Несколько имен в БД - нужен выбор
+        msg = f"⚠️ КОД {exp['code']} ИМЕЕТ НЕСКОЛЬКО ИМЕН В БАЗЕ:\n\n"
+        for i, name in enumerate(exp['available_names'], 1):
+            msg += f"{i}. {name}\n"
+        msg += f"\nПод каким именем сохранить расход {exp['amount']}₽?\n"
+        msg += "Введите номер:"
+        await update.message.reply_text(msg)
+    
+    elif exp.get('needs_input'):
+        # Новый код - нужен ввод имени
+        msg = f"❓ КОД {exp['code']} НЕ НАЙДЕН В БАЗЕ\n\n"
+        msg += f"Это новый сотрудник?\n"
+        msg += f"Введите имя для кода {exp['code']}:"
+        await update.message.reply_text(msg)
+
+
+async def handle_stylist_clarification(update: Update, state: UserState, text: str):
+    """Обработка ответа пользователя на вопросы уточнения"""
+    exp = state.stylist_clarification_queue[state.stylist_clarification_index]
+    
+    if exp.get('needs_selection'):
+        # Пользователь выбрал номер из списка
+        try:
+            choice = int(text.strip()) - 1
+            if choice < 0 or choice >= len(exp['available_names']):
+                await update.message.reply_text(
+                    f"❌ Неверный номер. Выберите от 1 до {len(exp['available_names'])}:"
+                )
+                return
+            
+            exp['name'] = exp['available_names'][choice]
+            del exp['needs_selection']
+            del exp['available_names']
+            
+        except ValueError:
+            await update.message.reply_text("❌ Введите номер (например, 1 или 2):")
+            return
+    
+    elif exp.get('needs_input'):
+        # Пользователь ввел новое имя
+        new_name = text.strip().capitalize()
+        if not new_name or len(new_name) < 2:
+            await update.message.reply_text("❌ Введите корректное имя:")
+            return
+        
+        exp['name'] = new_name
+        del exp['needs_input']
+    
+    # Переходим к следующему вопросу
+    state.stylist_clarification_index += 1
+    
+    if state.stylist_clarification_index < len(state.stylist_clarification_queue):
+        # Есть ещё вопросы
+        await ask_next_clarification(update, state)
+    else:
+        # Все уточнения завершены
+        await update.message.reply_text("✅ Все уточнения завершены!\n")
+        
+        state.stylist_clarification_queue = None
+        state.stylist_clarification_index = None
+        
+        # Показываем предпросмотр
+        await show_stylist_preview(update, state)
+        state.mode = 'awaiting_stylist_confirm'
 
 
 async def handle_stylist_view(query, club: str):
