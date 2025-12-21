@@ -680,6 +680,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Команда "кнопки" - показать клавиатуру
     if text_lower == 'кнопки':
+        # Блокируем для ограниченного доступа
+        if state.limited_access:
+            await update.message.reply_text(
+                "❌ Доступ запрещён\n\n"
+                "У вас ограниченный доступ.\n"
+                "Доступна только функция 'Выплаты'."
+            )
+            return
+        
         if state.club:
             await update.message.reply_text(
                 "Клавиатура:",
@@ -3894,6 +3903,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Выбор клуба при старте
     if query.data == 'club_moskvich':
+        # Блокируем для ограниченного доступа
+        if state.limited_access:
+            await query.answer("❌ Доступ запрещён", show_alert=True)
+            return
+        
         # Проверяем режим - загрузка файла или обычный старт
         if state.mode == 'awaiting_upload_club':
             state.upload_file_club = 'Москвич'
@@ -3919,6 +3933,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
     
     elif query.data == 'club_anora':
+        # Блокируем для ограниченного доступа
+        if state.limited_access:
+            await query.answer("❌ Доступ запрещён", show_alert=True)
+            return
+        
         # Проверяем режим - загрузка файла или обычный старт
         if state.mode == 'awaiting_upload_club':
             state.upload_file_club = 'Анора'
