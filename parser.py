@@ -530,6 +530,7 @@ class DataParser:
         Формат входных данных (БЕЗ периода):
         Вариант 1: Д14Бритни 2000
         Вариант 2: Д14 - 2000 (без имени, будет искаться в БД)
+        Вариант 3: Марго (Д14): 2000 (ИМЯ (КОД): СУММА)
         
         Args:
             text: Текст с данными о расходах (без периода)
@@ -549,6 +550,9 @@ class DataParser:
         
         # Паттерн 2: КОД + СУММА (Д14 - 500 или Д14 500)
         expense_pattern_code_only = r'^([А-ЯЁA-Z]+\d+)\s*-?\s*(\d+)$'
+        
+        # Паттерн 3: ИМЯ (КОД): СУММА (Марго (Д13): 2500)
+        expense_pattern_name_code = r'^([А-ЯЁа-яёA-Za-z]+)\s*\(([А-ЯЁA-Z]+\d+)\)\s*:?\s*(\d+)$'
         
         # Карта латинских букв на кириллические
         latin_to_cyrillic = {
@@ -579,7 +583,27 @@ class DataParser:
             if not any(c.isdigit() for c in line):
                 continue
             
-            # Сначала пробуем паттерн с именем
+            # Сначала пробуем паттерн ИМЯ (КОД): СУММА
+            match = re.match(expense_pattern_name_code, line, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                code = match.group(2).strip()
+                amount = int(match.group(3))
+                
+                # Нормализуем код (латиница -> кириллица, верхний регистр)
+                code = normalize_code_cyrillic(code)
+                
+                # Нормализуем имя (первая буква заглавная)
+                name = name.capitalize()
+                
+                expenses.append({
+                    'code': code,
+                    'name': name,
+                    'amount': amount
+                })
+                continue
+            
+            # Пробуем паттерн КОДИМЯ СУММА
             match = re.match(expense_pattern_full, line, re.IGNORECASE)
             if match:
                 code = match.group(1).strip()
@@ -599,7 +623,7 @@ class DataParser:
                 })
                 continue
             
-            # Пробуем паттерн без имени
+            # Пробуем паттерн КОД - СУММА (без имени)
             match = re.match(expense_pattern_code_only, line, re.IGNORECASE)
             if match:
                 code = match.group(1).strip()
