@@ -367,16 +367,20 @@ class ReportGenerator:
             cell = ws.cell(row=row_num, column=col, value='')
             cell.border = border
         
-        # Ширина столбцов
-        ws.column_dimensions['A'].width = 25
-        ws.column_dimensions['B'].width = 10
-        ws.column_dimensions['C'].width = 12
-        ws.column_dimensions['D'].width = 12
-        ws.column_dimensions['E'].width = 15
-        ws.column_dimensions['F'].width = 12
-        ws.column_dimensions['G'].width = 30
-        ws.column_dimensions['H'].width = 15
-        ws.column_dimensions['I'].width = 25
+        # Автоматическая подгонка ширины столбцов
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        cell_length = len(str(cell.value))
+                        if cell_length > max_length:
+                            max_length = cell_length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column_letter].width = adjusted_width
         
         # Сохраняем
         wb.save(filename)
@@ -493,16 +497,20 @@ class ReportGenerator:
                 cell = ws.cell(row=row_num, column=col, value='')
                 cell.border = border
             
-            # Ширина столбцов
-            ws.column_dimensions['A'].width = 25
-            ws.column_dimensions['B'].width = 10
-            ws.column_dimensions['C'].width = 12
-            ws.column_dimensions['D'].width = 12
-            ws.column_dimensions['E'].width = 15
-            ws.column_dimensions['F'].width = 12
-            ws.column_dimensions['G'].width = 30
-            ws.column_dimensions['H'].width = 15
-            ws.column_dimensions['I'].width = 25
+            # Автоматическая подгонка ширины столбцов
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if cell.value:
+                            cell_length = len(str(cell.value))
+                            if cell_length > max_length:
+                                max_length = cell_length
+                    except:
+                        pass
+                adjusted_width = max_length + 2
+                ws.column_dimensions[column_letter].width = adjusted_width
         
         # Лист 1: Москвич
         ws1 = wb.active
