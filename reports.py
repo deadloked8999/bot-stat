@@ -61,29 +61,46 @@ class ReportGenerator:
         
         # Добавляем расходы на стилистов
         if stylist_expenses:
+            print(f"🔍 DEBUG: Всего расходов на стилистов: {len(stylist_expenses)}")
             for expense in stylist_expenses:
                 exp_code = expense['code']
                 exp_name = expense['name']
                 exp_amount = expense['amount']
                 
+                print(f"🔍 DEBUG: Обрабатываю стилиста - код: {exp_code}, имя: {exp_name}, сумма: {exp_amount}")
+                
                 # Ищем соответствующего сотрудника
                 # Для СБ не ищем (СБ не может иметь расходов на стилистов)
                 if exp_code == 'СБ':
+                    print(f"  ⚠️ Пропускаем СБ")
                     continue
                 
                 # Для обычных сотрудников ищем по коду
                 group_key = exp_code
                 
+                print(f"  🔑 group_key: {group_key}")
+                print(f"  📋 Ключи в employee_data: {list(employee_data.keys())}")
+                
                 # Проверяем, есть ли такой сотрудник в данных
                 if group_key in employee_data:
+                    print(f"  ✅ Сотрудник НАЙДЕН в данных")
                     # Проверяем совпадение имени (для безопасности)
                     names_in_data = list(employee_data[group_key]['names'])
                     # Нормализуем имена для сравнения
                     names_normalized = [n.lower().strip() for n in names_in_data]
                     exp_name_normalized = exp_name.lower().strip()
                     
+                    print(f"  📝 Имена в данных: {names_in_data}")
+                    print(f"  📝 Имена нормализованные: {names_normalized}")
+                    print(f"  📝 Имя стилиста нормализованное: {exp_name_normalized}")
+                    
                     if exp_name_normalized in names_normalized or not names_in_data:
+                        print(f"  ✅ Имя СОВПАЛО! Добавляю {exp_amount}₽")
                         employee_data[group_key]['stylist'] += exp_amount
+                    else:
+                        print(f"  ❌ Имя НЕ СОВПАЛО! Пропускаю.")
+                else:
+                    print(f"  ❌ Сотрудник НЕ НАЙДЕН в данных")
         
         # Формируем строки отчета
         report_rows = []
