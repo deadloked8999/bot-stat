@@ -2121,7 +2121,15 @@ async def prepare_merged_report(update: Update, state: UserState, date_from: str
         all_ops = ops_moskvich + ops_anora
         
         if all_ops:
-            report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(all_ops)
+            # Загружаем расходы на стилистов для обоих клубов
+            stylist_expenses_m = db.get_stylist_expenses_for_period('Москвич', date_from, date_to)
+            stylist_expenses_a = db.get_stylist_expenses_for_period('Анора', date_from, date_to)
+            stylist_expenses_merged = stylist_expenses_m + stylist_expenses_a
+            
+            report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+                all_ops,
+                stylist_expenses=stylist_expenses_merged
+            )
             
             # Определяем куда отправлять
             msg = update.message if update.message else (update.callback_query.message if update.callback_query else None)
@@ -2969,8 +2977,14 @@ async def handle_duplicate_confirmation(update: Update, context: ContextTypes.DE
         await prepare_sb_merge(update, state, data['club'], data['date_from'], data['date_to'], updated_operations, sb_duplicates)
         return
     
+    # Загружаем расходы на стилистов для этого периода
+    stylist_expenses = db.get_stylist_expenses_for_period(data['club'], data['date_from'], data['date_to'])
+    
     # Генерируем отчёт с объединёнными данными
-    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(updated_operations)
+    report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
+        updated_operations,
+        stylist_expenses=stylist_expenses
+    )
     
     # Краткая сводка с информацией об объединении
     summary = format_report_summary(
@@ -3119,10 +3133,14 @@ async def handle_sb_merge_confirmation(update: Update, context: ContextTypes.DEF
     # Получаем данные из БД (БЕЗ изменений!)
     operations = db.get_operations_by_period(data['club'], data['date_from'], data['date_to'])
     
+    # Загружаем расходы на стилистов для этого периода
+    stylist_expenses = db.get_stylist_expenses_for_period(data['club'], data['date_from'], data['date_to'])
+    
     # Генерируем отчёт с объединёнными данными (только для отчета)
     report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
         operations, 
-        sb_name_merges=sb_name_merges if sb_name_merges else None
+        sb_name_merges=sb_name_merges if sb_name_merges else None,
+        stylist_expenses=stylist_expenses
     )
     
     # Краткая сводка с информацией об объединенных СБ
@@ -3380,9 +3398,13 @@ async def generate_and_send_report(update: Update, club: str, date_from: str, da
             return
     
     # Генерируем отчет (без дубликатов или после подтверждения)
+    # Загружаем расходы на стилистов для этого периода
+    stylist_expenses = db.get_stylist_expenses_for_period(club, date_from, date_to)
+    
     report_rows, totals, totals_recalc, check_ok = ReportGenerator.calculate_report(
         operations,
-        sb_name_merges=sb_name_merges if sb_name_merges else None
+        sb_name_merges=sb_name_merges if sb_name_merges else None,
+        stylist_expenses=stylist_expenses
     )
     
     # Краткая сводка вместо полного отчёта
