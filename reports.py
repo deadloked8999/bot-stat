@@ -513,6 +513,110 @@ class ReportGenerator:
         ws3 = wb.create_sheet(title="Сводный")
         fill_sheet(ws3, "СВОДНЫЙ (Москвич + Анора)", report_merged[0], report_merged[1])
         
+        # Лист 4: Самозанятые
+        ws4 = wb.create_sheet(title="Самозанятые")
+        
+        # Заголовок
+        ws4['A1'] = "Самозанятые"
+        ws4['A1'].font = Font(bold=True, size=14)
+        ws4['A2'] = f"Период: {period}"
+        ws4['A2'].font = Font(size=11)
+        
+        # Шапка таблицы
+        headers_se = [
+            '№ п/п', 'ФИО', 'Номер', 'Должность',
+            'Вознаграждение Анора', 'Вознаграждение Москвич',
+            'ИП Лещук', 'Итого'
+        ]
+        for col, header in enumerate(headers_se, 1):
+            cell = ws4.cell(row=4, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
+        
+        # Собираем данные самозанятых из сводного отчета
+        row_num = 5
+        number = 1
+        
+        for row_merged in report_merged[0]:
+            code = row_merged['code']
+            
+            # Проверяем самозанятость
+            if db:
+                normalized_code = code.upper().strip()
+                is_self_employed = db.is_self_employed(normalized_code)
+                
+                if is_self_employed:
+                    # № п/п
+                    cell = ws4.cell(row=row_num, column=1, value=number)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.border = border
+                    
+                    # ФИО
+                    cell = ws4.cell(row=row_num, column=2, value=row_merged['name'])
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+                    cell.border = border
+                    
+                    # Номер (код)
+                    cell = ws4.cell(row=row_num, column=3, value=code)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.border = border
+                    
+                    # Должность (пусто)
+                    cell = ws4.cell(row=row_num, column=4, value='')
+                    cell.border = border
+                    
+                    # Ищем этот код в Анора
+                    vozn_anora = 0
+                    for row_a in report_anora[0]:
+                        if row_a['code'] == code:
+                            vozn_anora = row_a['itog']
+                            break
+                    
+                    cell = ws4.cell(row=row_num, column=5, value=vozn_anora)
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.border = border
+                    
+                    # Ищем этот код в Москвиче
+                    vozn_moskvich = 0
+                    for row_m in report_moskvich[0]:
+                        if row_m['code'] == code:
+                            vozn_moskvich = row_m['itog']
+                            break
+                    
+                    cell = ws4.cell(row=row_num, column=6, value=vozn_moskvich)
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.border = border
+                    
+                    # ИП Лещук (пусто)
+                    cell = ws4.cell(row=row_num, column=7, value='')
+                    cell.border = border
+                    
+                    # Итого (к выплате самозанятому из сводного)
+                    payout = round(row_merged['itog'] / 0.94, 2)
+                    cell = ws4.cell(row=row_num, column=8, value=payout)
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.border = border
+                    
+                    row_num += 1
+                    number += 1
+        
+        # Автоподгонка ширины для листа Самозанятые
+        for column in ws4.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        cell_length = len(str(cell.value))
+                        if cell_length > max_length:
+                            max_length = cell_length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws4.column_dimensions[column_letter].width = adjusted_width
+        
         # Сохраняем
         wb.save(filename)
         return filename
