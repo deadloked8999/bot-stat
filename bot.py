@@ -3557,23 +3557,27 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         return
     
     # Формируем текстовый файл
-    content = "=" * 60 + "\n"
-    content += f"{'ВЫПЛАТЫ СОТРУДНИКУ ' + code:^60}\n"
-    content += f"{'Период: ' + date_from + ' .. ' + date_to:^60}\n"
-    content += "=" * 60 + "\n\n"
+    content = "=" * 70 + "\n"
+    content += f"{'ВЫПЛАТЫ СОТРУДНИКУ ' + code:^70}\n"
+    content += f"{'Период: ' + date_from + ' .. ' + date_to:^70}\n"
+    content += "=" * 70 + "\n\n"
     
-    # Группируем по клубам
+    # Группируем по клубам и датам
     from collections import defaultdict
-    by_club = defaultdict(lambda: {'nal': 0, 'beznal': 0, 'payments': []})
+    by_club = defaultdict(lambda: {'nal': 0, 'beznal': 0, 'by_date': defaultdict(lambda: {'nal': 0, 'beznal': 0})})
     
     for payment in payments:
         club = payment['club']
-        by_club[club]['payments'].append(payment)
+        date = payment['date']
+        amount = payment['amount']
         
+        # Группируем по дате
         if payment['channel'] == 'нал':
-            by_club[club]['nal'] += payment['amount']
+            by_club[club]['by_date'][date]['nal'] += amount
+            by_club[club]['nal'] += amount
         else:
-            by_club[club]['beznal'] += payment['amount']
+            by_club[club]['by_date'][date]['beznal'] += amount
+            by_club[club]['beznal'] += amount
     
     # Общие итоги
     total_nal = 0
@@ -3583,14 +3587,28 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     for club in sorted(by_club.keys()):
         data = by_club[club]
         content += f"\nКЛУБ: {club}\n"
-        content += "-" * 60 + "\n"
-        content += f"{'Дата':<13} | {'Канал':<7} | {'Имя':<15} | {'Сумма':>10}\n"
-        content += "-" * 60 + "\n"
+        content += "-" * 70 + "\n"
+        content += f"{'Дата':<10} | {'НАЛ':>10} | {'БЕЗНАЛ':>10} | {'10%':>10} | {'ИТОГО':>10}\n"
+        content += "-" * 70 + "\n"
         
-        for payment in data['payments']:
-            content += f"{payment['date']:<13} | {payment['channel'].upper():<7} | {payment['name']:<15} | {payment['amount']:>10.0f}\n"
+        # Сортируем даты
+        for date in sorted(data['by_date'].keys()):
+            date_data = data['by_date'][date]
+            nal_sum = date_data['nal']
+            beznal_sum = date_data['beznal']
+            minus10 = beznal_sum * 0.1
+            itog = nal_sum + (beznal_sum - minus10)
+            
+            # Преобразуем дату из 2024-10-30 в 30.10.24
+            try:
+                year, month, day = date.split('-')
+                date_short = f"{day}.{month}.{year[2:]}"
+            except:
+                date_short = date
+            
+            content += f"{date_short:<10} | {nal_sum:>10.0f} | {beznal_sum:>10.0f} | {minus10:>10.0f} | {itog:>10.0f}\n"
         
-        content += "-" * 60 + "\n"
+        content += "-" * 70 + "\n"
         
         # Итог по клубу
         club_nal = data['nal']
@@ -3598,30 +3616,30 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         club_minus10 = club_beznal * 0.1
         club_total = club_nal + (club_beznal - club_minus10)
         
-        content += "Итог по клубу:\n"
-        content += f"  НАЛ:                 {club_nal:>10.0f}\n"
-        content += f"  БЕЗНАЛ:              {club_beznal:>10.0f}\n"
-        content += f"  10% от безнала:      {club_minus10:>10.0f}\n"
-        content += f"  ИТОГО к выплате:     {club_total:>10.0f}\n"
+        content += "ИТОГО ПО КЛУБУ:\n"
+        content += f"  НАЛ:                                           {club_nal:>15.0f}\n"
+        content += f"  БЕЗНАЛ:                                        {club_beznal:>15.0f}\n"
+        content += f"  10% от безнала:                                {club_minus10:>15.0f}\n"
+        content += f"  К ВЫПЛАТЕ:                                     {club_total:>15.0f}\n"
         content += "\n"
         
         total_nal += data['nal']
         total_beznal += data['beznal']
     
     # Общий итог по всем клубам
-    content += "\n" + "=" * 60 + "\n"
-    content += f"{'ИТОГО ПО ВСЕМ КЛУБАМ':^60}\n"
-    content += "=" * 60 + "\n"
+    content += "\n" + "=" * 70 + "\n"
+    content += f"{'ИТОГО ПО ВСЕМ КЛУБАМ':^70}\n"
+    content += "=" * 70 + "\n"
     
     total_minus10 = total_beznal * 0.1
     total_itog = total_nal + (total_beznal - total_minus10)
     
-    content += f"НАЛ:                   {total_nal:>10.0f}\n"
-    content += f"БЕЗНАЛ:                {total_beznal:>10.0f}\n"
-    content += f"10% от безнала:        {total_minus10:>10.0f}\n"
-    content += "-" * 60 + "\n"
-    content += f"ИТОГО К ВЫПЛАТЕ:       {total_itog:>10.0f}\n"
-    content += "=" * 60 + "\n"
+    content += f"НАЛ:                                             {total_nal:>15.0f}\n"
+    content += f"БЕЗНАЛ:                                          {total_beznal:>15.0f}\n"
+    content += f"10% от безнала:                                  {total_minus10:>15.0f}\n"
+    content += "-" * 70 + "\n"
+    content += f"ИТОГО К ВЫПЛАТЕ:                                 {total_itog:>15.0f}\n"
+    content += "=" * 70 + "\n"
     
     # Создаем файл
     filename = f"vyplaty_{code}_{date_from}_{date_to}.txt"
