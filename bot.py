@@ -3557,9 +3557,11 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         return
     
     # Формируем ответ с группировкой по клубам
-    response_parts = []
-    response_parts.append(f"📊 Выплаты сотруднику {code}")
-    response_parts.append(f"Период: {date_from} .. {date_to}\n")
+    response = f"```\n"
+    response += f"{'='*60}\n"
+    response += f"  ВЫПЛАТЫ СОТРУДНИКУ {code}\n"
+    response += f"  Период: {date_from} .. {date_to}\n"
+    response += f"{'='*60}\n\n"
     
     # Группируем по клубам
     from collections import defaultdict
@@ -3581,38 +3583,51 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     # Выводим по каждому клубу
     for club in sorted(by_club.keys()):
         data = by_club[club]
-        response_parts.append(f"🏢 Клуб: {club}")
+        response += f"КЛУБ: {club}\n"
+        response += f"{'-'*60}\n"
+        response += f"{'Дата':<12} {'Канал':<8} {'Имя':<15} {'Сумма':>10}\n"
+        response += f"{'-'*60}\n"
         
         for payment in data['payments']:
             if payment['channel'] == 'нал':
-                response_parts.append(
-                    f"  {payment['date']} | НАЛ     | {payment['name']:15} | {payment['amount']:.0f}"
-                )
+                response += f"{payment['date']:<12} {'НАЛ':<8} {payment['name']:<15} {payment['amount']:>10.0f}\n"
             else:
-                # БЕЗНАЛ - показываем полную сумму и к выплате (минус 10%)
-                to_pay = payment['amount'] * 0.9
-                response_parts.append(
-                    f"  {payment['date']} | БЕЗНАЛ  | {payment['name']:15} | {payment['amount']:.0f} (к выплате: {to_pay:.0f})"
-                )
+                # БЕЗНАЛ - показываем полную сумму
+                response += f"{payment['date']:<12} {'БЕЗНАЛ':<8} {payment['name']:<15} {payment['amount']:>10.0f}\n"
+        
+        response += f"{'-'*60}\n"
         
         # Итог по клубу
-        club_total = data['nal'] + (data['beznal'] * 0.9)
-        response_parts.append(f"  Итого {club}: {club_total:.0f}\n")
+        club_nal = data['nal']
+        club_beznal = data['beznal']
+        club_minus10 = club_beznal * 0.1
+        club_total = club_nal + (club_beznal - club_minus10)
+        
+        response += f"{'НАЛ:':<30} {club_nal:>10.0f}\n"
+        response += f"{'БЕЗНАЛ:':<30} {club_beznal:>10.0f}\n"
+        response += f"{'10% от безнала:':<30} {club_minus10:>10.0f}\n"
+        response += f"{'ИТОГО к выплате:':<30} {club_total:>10.0f}\n"
+        response += f"\n"
         
         total_nal += data['nal']
         total_beznal += data['beznal']
     
     # Общий итог по всем клубам
+    response += f"{'='*60}\n"
+    response += f"ИТОГО ПО ВСЕМ КЛУБАМ:\n"
+    response += f"{'='*60}\n"
+    
     total_minus10 = total_beznal * 0.1
     total_itog = total_nal + (total_beznal - total_minus10)
     
-    response_parts.append("💰 ИТОГО ПО ВСЕМ КЛУБАМ:")
-    response_parts.append(f"  НАЛ: {total_nal:.0f}")
-    response_parts.append(f"  БЕЗНАЛ: {total_beznal:.0f}")
-    response_parts.append(f"  10% от безнала: {total_minus10:.0f}")
-    response_parts.append(f"  ИТОГО к выплате: {total_itog:.0f}")
+    response += f"{'НАЛ:':<30} {total_nal:>10.0f}\n"
+    response += f"{'БЕЗНАЛ:':<30} {total_beznal:>10.0f}\n"
+    response += f"{'10% от безнала:':<30} {total_minus10:>10.0f}\n"
+    response += f"{'ИТОГО к выплате:':<30} {total_itog:>10.0f}\n"
+    response += f"{'='*60}\n"
+    response += "```"
     
-    await update.message.reply_text('\n'.join(response_parts))
+    await update.message.reply_text(response, parse_mode='Markdown')
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
