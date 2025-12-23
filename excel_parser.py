@@ -196,11 +196,29 @@ class ExcelProcessor:
         Returns:
             Список словарей с данными по каждому сотруднику
         """
+        # Пытаемся найти лист с разным регистром
+        sheet_name = None
         try:
-            # Читаем лист "ЛИСТ ВЫПЛАТ"
-            df = pd.read_excel(io.BytesIO(file_content), sheet_name='ЛИСТ ВЫПЛАТ', header=None, engine='openpyxl')
+            # Получаем список всех листов
+            import pandas as pd
+            excel_file = pd.ExcelFile(io.BytesIO(file_content), engine='openpyxl')
+            sheet_names = excel_file.sheet_names
+            
+            # Ищем лист с названием содержащим "лист" и "выплат" (любой регистр)
+            for name in sheet_names:
+                name_lower = name.lower().strip()
+                if 'лист' in name_lower and 'выплат' in name_lower:
+                    sheet_name = name
+                    break
+            
+            if not sheet_name:
+                logger.error("Sheet with 'лист выплат' not found in file")
+                return []
+            
+            df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name, header=None, engine='openpyxl')
+            
         except Exception as e:
-            logger.error(f"Error reading 'ЛИСТ ВЫПЛАТ': {e}")
+            logger.error(f"Error reading payments sheet: {e}")
             return []
         
         if df.empty:
