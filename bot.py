@@ -4620,7 +4620,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("❌ Доступ запрещён", show_alert=True)
             return
         
-        # Проверяем режим - загрузка файла или обычный старт
+        # Проверяем режим - загрузка файла, загрузка ЗП или обычный старт
         if state.mode == 'awaiting_upload_club':
             state.upload_file_club = 'Москвич'
             await query.edit_message_text(
@@ -4630,6 +4630,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"Формат: 3,11 или 30,10"
             )
             state.mode = 'awaiting_upload_date'
+        elif state.mode == 'awaiting_payments_upload_club':
+            state.payments_upload_club = 'Москвич'
+            await query.edit_message_text(
+                f"💰 ЗАГРУЗКА ЗП\n"
+                f"🏢 Клуб: Москвич\n\n"
+                f"📅 Введите дату (формат: 30,10):"
+            )
+            state.mode = 'awaiting_payments_upload_date'
         else:
             state.club = 'Москвич'
             state.current_date = get_current_date()
@@ -4650,7 +4658,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("❌ Доступ запрещён", show_alert=True)
             return
         
-        # Проверяем режим - загрузка файла или обычный старт
+        # Проверяем режим - загрузка файла, загрузка ЗП или обычный старт
         if state.mode == 'awaiting_upload_club':
             state.upload_file_club = 'Анора'
             await query.edit_message_text(
@@ -4660,6 +4668,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"Формат: 3,11 или 30,10"
             )
             state.mode = 'awaiting_upload_date'
+        elif state.mode == 'awaiting_payments_upload_club':
+            state.payments_upload_club = 'Анора'
+            await query.edit_message_text(
+                f"💰 ЗАГРУЗКА ЗП\n"
+                f"🏢 Клуб: Анора\n\n"
+                f"📅 Введите дату (формат: 30,10):"
+            )
+            state.mode = 'awaiting_payments_upload_date'
         else:
             state.club = 'Анора'
             state.current_date = get_current_date()
