@@ -97,6 +97,31 @@ class Database:
             )
         """)
         
+        # Таблица выплат (из ЛИСТА ВЫПЛАТ)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                club TEXT NOT NULL,
+                date TEXT NOT NULL,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                stavka REAL DEFAULT 0,
+                lm_3 REAL DEFAULT 0,
+                percent_5 REAL DEFAULT 0,
+                promo REAL DEFAULT 0,
+                crz REAL DEFAULT 0,
+                cons REAL DEFAULT 0,
+                tips REAL DEFAULT 0,
+                fines REAL DEFAULT 0,
+                total_shift REAL DEFAULT 0,
+                debt REAL DEFAULT 0,
+                debt_nal REAL DEFAULT 0,
+                to_pay REAL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(club, date, code)
+            )
+        """)
+        
         # Индексы для быстрого поиска
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_operations_club_date 
@@ -106,6 +131,11 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_operations_code 
             ON operations(code)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_payments_club_date 
+            ON payments(club, date)
         """)
         
         conn.commit()
@@ -917,6 +947,43 @@ class Database:
             print(f"Ошибка получения расходов на стилистов: {e}")
             conn.close()
             return []
+    
+    def add_payment(self, club: str, date: str, code: str, name: str,
+                    stavka: float = 0, lm_3: float = 0, percent_5: float = 0,
+                    promo: float = 0, crz: float = 0, cons: float = 0,
+                    tips: float = 0, fines: float = 0, total_shift: float = 0,
+                    debt: float = 0, debt_nal: float = 0, to_pay: float = 0):
+        """Добавить или обновить запись о выплате"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO payments 
+            (club, date, code, name, stavka, lm_3, percent_5, promo, crz, cons, 
+             tips, fines, total_shift, debt, debt_nal, to_pay, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (club, date, code, name, stavka, lm_3, percent_5, promo, crz, cons,
+              tips, fines, total_shift, debt, debt_nal, to_pay, 
+              datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        
+        conn.commit()
+        conn.close()
+
+    def get_payments(self, club: str, date_from: str, date_to: str):
+        """Получить все выплаты за период"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT * FROM payments
+            WHERE club = ? AND date >= ? AND date <= ?
+            ORDER BY date, code
+        """, (club, date_from, date_to))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return rows
     
     def get_stylist_expenses_periods(self, club: str) -> List[Dict]:
         """

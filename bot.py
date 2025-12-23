@@ -115,6 +115,11 @@ class UserState:
         self.upload_file_date: Optional[str] = None
         self.upload_file_data: Optional[dict] = None
         
+        # Для загрузки листа выплат (ЗП)
+        self.payments_upload_club: Optional[str] = None
+        self.payments_upload_date: Optional[str] = None
+        self.payments_upload_data: Optional[list] = None
+        
         # Для расходов на стилистов
         self.stylist_club: Optional[str] = None
         self.stylist_period_from: Optional[str] = None
@@ -172,7 +177,7 @@ def get_main_keyboard():
     """Главная клавиатура с основными командами"""
     keyboard = [
         ['📥 НАЛ', '📥 БЕЗНАЛ'],
-        ['📎 ЗАГРУЗИТЬ ФАЙЛ'],
+        ['📎 ЗАГРУЗИТЬ ФАЙЛ', '💰 ЗАГРУЗИТЬ ЗП'],
         ['✅ ГОТОВО', '❌ ОТМЕНА'],
         ['📊 ОТЧЁТ', '💰 ВЫПЛАТЫ', '💵 ЗП'],
         ['📋 СПИСОК', '📤 ЭКСПОРТ'],
@@ -413,10 +418,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_edit_params', 'awaiting_edit_data', 'awaiting_delete_choice',
             'awaiting_report_club', 'awaiting_report_period', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
             'awaiting_export_club', 'awaiting_export_period',
-            'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input',
+            'awaiting_merge_confirm', 'awaiting_list_club', 'awaiting_list_date', 'awaiting_payments_input', 'awaiting_salary_input',
             'awaiting_delete_mass_club', 'awaiting_delete_mass_period', 'awaiting_delete_mass_confirm',
             'awaiting_delete_employee_input',
             'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file', 'awaiting_upload_confirm',
+            'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
             'awaiting_stylist_period', 'awaiting_stylist_data', 'awaiting_stylist_confirm', 
             'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data', 'awaiting_stylist_clarification',
             'нал', 'безнал'
@@ -453,6 +459,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.upload_file_club = None
             state.upload_file_date = None
             state.upload_file_data = None
+            state.payments_upload_club = None
+            state.payments_upload_date = None
+            state.payments_upload_data = None
             state.stylist_club = None
             state.stylist_period_from = None
             state.stylist_period_to = None
@@ -471,7 +480,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверка ограниченного доступа (пароль 0001)
     # Список команд, доступных ТОЛЬКО при полном доступе
     restricted_commands = [
-        'нал', 'безнал', 'готово', 'загрузить файл',
+        'нал', 'безнал', 'готово', 'загрузить файл', 'загрузить зп',
         'отчет', 'список', 'экспорт', 
         'исправить', 'удалить', 'обнулить',
         'сотрудники', 'объединить', 'самозанятые', 'стилисты',
@@ -488,8 +497,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'awaiting_edit_params', 'awaiting_edit_data',
         'awaiting_delete_choice', 'awaiting_delete_mass_club',
         'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file',
+        'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
         'awaiting_stylist_period', 'awaiting_stylist_data',
-        'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm'
+        'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
+        'awaiting_salary_input'
     ]
     
     if state.limited_access:
@@ -540,6 +551,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📄 Теперь отправьте Excel файл"
             )
             state.mode = 'awaiting_upload_file'
+        else:
+            await update.message.reply_text(
+                f"❌ {error}\n\n"
+                f"Введите дату (формат: 30,10) или напишите: отмена"
+            )
+        return
+    
+    # Обработка выбора клуба для загрузки ЗП
+    if state.mode == 'awaiting_payments_upload_club':
+        club_choice = text_lower
+        if club_choice in ['москвич', 'анора']:
+            state.payments_upload_club = 'Москвич' if club_choice == 'москвич' else 'Анора'
+            await update.message.reply_text(
+                f"💰 ЗАГРУЗКА ЗП\n"
+                f"🏢 Клуб: {state.payments_upload_club}\n\n"
+                f"📅 Введите дату (формат: 30,10):"
+            )
+            state.mode = 'awaiting_payments_upload_date'
+        else:
+            await update.message.reply_text("❌ Выберите: москвич или анора")
+        return
+    
+    # Обработка ввода даты для загрузки ЗП
+    if state.mode == 'awaiting_payments_upload_date':
+        success, parsed_date, error = parse_short_date(text)
+        if success:
+            state.payments_upload_date = parsed_date
+            await update.message.reply_text(
+                f"💰 ЗАГРУЗКА ЗП\n"
+                f"🏢 Клуб: {state.payments_upload_club}\n"
+                f"📅 Дата: {parsed_date}\n\n"
+                f"📄 Теперь отправьте Excel файл"
+            )
+            state.mode = 'awaiting_payments_upload_file'
         else:
             await update.message.reply_text(
                 f"❌ {error}\n\n"
@@ -647,6 +692,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '📥 нал': 'нал',
         '📥 безнал': 'безнал',
         '📎 загрузить файл': 'загрузить файл',
+        '💰 загрузить зп': 'загрузить зп',
         '✅ готово': 'готово',
         '❌ отмена': 'отмена',
         '📊 отчёт': 'отчет',
@@ -853,6 +899,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     
+    # Обработка подтверждения сохранения ЗП
+    if state.mode == 'awaiting_payments_save_confirm':
+        if text_lower == 'сохранить':
+            if not state.payments_upload_data:
+                await update.message.reply_text("❌ Данные не найдены")
+                state.mode = None
+                return
+            
+            await update.message.reply_text("⏳ Сохраняю данные в базу...")
+            
+            saved_count = 0
+            for payment in state.payments_upload_data:
+                db.add_payment(
+                    club=state.payments_upload_club,
+                    date=state.payments_upload_date,
+                    code=payment['code'],
+                    name=payment['name'],
+                    stavka=payment['stavka'],
+                    lm_3=payment['lm_3'],
+                    percent_5=payment['percent_5'],
+                    promo=payment['promo'],
+                    crz=payment['crz'],
+                    cons=payment['cons'],
+                    tips=payment['tips'],
+                    fines=payment['fines'],
+                    total_shift=payment['total_shift'],
+                    debt=payment['debt'],
+                    debt_nal=payment['debt_nal'],
+                    to_pay=payment['to_pay']
+                )
+                saved_count += 1
+            
+            await update.message.reply_text(
+                f"✅ СОХРАНЕНО!\n\n"
+                f"🏢 Клуб: {state.payments_upload_club}\n"
+                f"📅 Дата: {state.payments_upload_date}\n"
+                f"📊 Записей: {saved_count}\n\n"
+                f"Данные можно просмотреть через кнопку ЗП"
+            )
+            
+            # Очищаем состояние
+            state.payments_upload_club = None
+            state.payments_upload_date = None
+            state.payments_upload_data = None
+            state.mode = None
+            
+        elif text_lower == 'отмена' or text_lower == '❌ отмена':
+            state.payments_upload_club = None
+            state.payments_upload_date = None
+            state.payments_upload_data = None
+            state.mode = None
+            await update.message.reply_text(
+                "❌ Загрузка ЗП отменена\n\n"
+                "Используйте кнопки меню:",
+                reply_markup=get_main_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ Введите СОХРАНИТЬ для сохранения или ОТМЕНА для отмены"
+            )
+        return
     
     # Команда "нал"
     if text_lower == 'нал':
@@ -914,6 +1021,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_club_keyboard()
         )
         state.mode = 'awaiting_upload_club'
+        return
+    
+    # Команда "загрузить зп"
+    if text_lower == 'загрузить зп' or text_lower == '💰 загрузить зп':
+        if state.has_data():
+            await update.message.reply_text(
+                "⚠️ У вас есть несохранённые данные!\n"
+                "Завершите ввод командой: готово\n"
+                "Или отмените: отмена"
+            )
+            return
+        
+        await update.message.reply_text(
+            "💰 ЗАГРУЗКА ЛИСТА ВЫПЛАТ\n\n"
+            "Выберите клуб:",
+            reply_markup=get_club_keyboard()
+        )
+        state.mode = 'awaiting_payments_upload_club'
         return
     
     # Обработка ввода периода для расходов на стилистов
@@ -1138,23 +1263,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_payments_command(update, context, state, text)
         return
     
-    # Команда "зп" (аналогична "выплаты")
+    # Команда "зп" (новый расширенный отчёт из таблицы payments)
     if text_lower.startswith('зп') or text_lower == 'зп':
         if text_lower == 'зп':
             # Нажата кнопка - переходим в режим ожидания
             await update.message.reply_text(
-                "Выплаты за период\n\n"
-                "Введите сотрудника и период:\n\n"
-                "Примеры:\n"
-                "• Д7 12,12\n"
-                "• Д7 10,06-11,08"
+                "💵 ОТЧЁТ ЗП\n\n"
+                "Введите:\n"
+                "• Код + период (Д7 3,10-5,11)\n"
+                "• Или клуб + период (москвич 3,10-5,11)\n"
+                "• Или оба + период (оба 3,10-5,11)"
             )
-            state.mode = 'awaiting_payments_input'
+            state.mode = 'awaiting_salary_input'
         else:
-            # Формат: зп Д1 30,10-1,11
-            # Заменяем "зп" на "выплаты" для обработки
-            text = text.replace('зп', 'выплаты', 1)
-            await handle_payments_command(update, context, state, text)
+            await handle_salary_command(update, context, state, text)
+        return
+    
+    # Обработка ввода для ЗП (после кнопки)
+    if state.mode == 'awaiting_salary_input':
+        await handle_salary_command(update, context, state, text)
+        state.mode = None
         return
     
     # Обработка ввода для выплат (после кнопки)
@@ -3891,6 +4019,570 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
         state.mode = 'awaiting_payments_input'
 
 
+async def handle_salary_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                state: UserState, text: str):
+    """Обработка команды ЗП - расширенный отчёт из таблицы payments"""
+    parts = text.split()
+    
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "❌ Неверный формат.\n\n"
+            "Примеры:\n"
+            "• Д7 3,10-5,11 (один сотрудник)\n"
+            "• москвич 3,10-5,11 (весь клуб)\n"
+            "• оба 3,10-5,11 (оба клуба)"
+        )
+        return
+    
+    # Определяем режим: код сотрудника или клуб
+    first_param = parts[0].lower()
+    period_str = parts[1]
+    
+    # Парсим период
+    if '-' in period_str:
+        success, date_from, date_to, error = parse_date_range(period_str)
+        if not success:
+            await update.message.reply_text(f"❌ {error}")
+            return
+    else:
+        success, single_date, error = parse_short_date(period_str)
+        if not success:
+            await update.message.reply_text(f"❌ {error}")
+            return
+        date_from = single_date
+        date_to = single_date
+    
+    # Определяем клуб и код
+    if first_param in ['москвич', 'анора', 'оба']:
+        # Режим: весь клуб
+        mode = 'club'
+        if first_param == 'оба':
+            clubs = ['Москвич', 'Анора']
+        else:
+            clubs = ['Москвич' if first_param == 'москвич' else 'Анора']
+        code = None
+    else:
+        # Режим: один сотрудник
+        mode = 'employee'
+        code = DataParser.normalize_code(first_param)
+        clubs = None
+    
+    await update.message.reply_text("⏳ Генерирую отчёт...")
+    
+    # Генерируем Excel
+    if mode == 'employee':
+        await generate_salary_excel_by_employee(update, code, date_from, date_to)
+    else:
+        await generate_salary_excel_by_club(update, clubs, date_from, date_to)
+
+
+async def generate_salary_excel_by_employee(update: Update, code: str, date_from: str, date_to: str):
+    """
+    Генерация Excel отчёта ЗП для одного сотрудника из таблицы payments
+    
+    Колонки в Excel:
+    Дата | Код | Имя | Ставка | 3% ЛМ | 5% | Промо | CRZ | Cons | Чаевые | 
+    ИТОГО выплат | Получила на смене | Долг БН | 10% (вычет) | Долг НАЛ | Стилисты | К выплате
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from collections import defaultdict
+    
+    # Получаем данные из БД по всем клубам
+    all_payments = []
+    for club in ['Москвич', 'Анора']:
+        club_payments = db.get_payments(club, date_from, date_to)
+        for row in club_payments:
+            # row это tuple из БД, преобразуем в dict
+            payment_dict = {
+                'id': row[0],
+                'club': row[1],
+                'date': row[2],
+                'code': row[3],
+                'name': row[4],
+                'stavka': row[5],
+                'lm_3': row[6],
+                'percent_5': row[7],
+                'promo': row[8],
+                'crz': row[9],
+                'cons': row[10],
+                'tips': row[11],
+                'fines': row[12],
+                'total_shift': row[13],
+                'debt': row[14],
+                'debt_nal': row[15],
+                'to_pay': row[16],
+                'created_at': row[17]
+            }
+            # Фильтруем по коду
+            if payment_dict['code'] == code:
+                all_payments.append(payment_dict)
+    
+    if not all_payments:
+        await update.message.reply_text(
+            f"📊 Отчёт ЗП для {code}\n"
+            f"Период: {date_from} .. {date_to}\n\n"
+            f"❌ Данных нет в таблице payments.\n"
+            f"Загрузите данные через кнопку 'ЗАГРУЗИТЬ ЗП'"
+        )
+        return
+    
+    # Сортируем по дате и клубу
+    all_payments.sort(key=lambda x: (x['date'], x['club']))
+    
+    # Получаем расходы на стилистов напрямую из БД с периодами
+    stylist_by_date_club = {}
+    from datetime import datetime, timedelta
+    for club in ['Москвич', 'Анора']:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Получаем расходы с периодами для пересекающихся дат
+            cursor.execute("""
+                SELECT code, name, amount, period_from, period_to
+                FROM stylist_expenses
+                WHERE club = ? AND code = ?
+                  AND NOT (period_to < ? OR period_from > ?)
+            """, (club, code, date_from, date_to))
+            
+            rows = cursor.fetchall()
+            for row in rows:
+                exp_code, exp_name, exp_amount, period_from, period_to = row
+                # Распределяем расход на даты периода
+                # Для простоты берём среднее значение на каждый день
+                start = datetime.strptime(period_from, '%Y-%m-%d')
+                end = datetime.strptime(period_to, '%Y-%m-%d')
+                days = (end - start).days + 1
+                daily_amount = exp_amount / days if days > 0 else exp_amount
+                
+                current = start
+                while current <= end:
+                    date_key = current.strftime('%Y-%m-%d')
+                    # Учитываем только даты в запрошенном периоде
+                    if date_key >= date_from and date_key <= date_to:
+                        club_key = (date_key, club)
+                        stylist_by_date_club[club_key] = stylist_by_date_club.get(club_key, 0) + daily_amount
+                    current += timedelta(days=1)
+        except Exception as e:
+            print(f"Ошибка получения расходов на стилистов: {e}")
+        finally:
+            conn.close()
+    
+    # Создаём Excel
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ЗП"
+    
+    # Стили
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=10)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Заголовок
+    ws['A1'] = f"Отчёт ЗП: {code} - {all_payments[0]['name']}"
+    ws['A1'].font = Font(bold=True, size=14)
+    ws['A2'] = f"Период: {date_from} .. {date_to}"
+    ws['A2'].font = Font(size=11)
+    
+    row_num = 4
+    
+    # Шапка таблицы
+    headers = [
+        'Дата', 'Клуб', 'Код', 'Имя', 'Ставка', '3% ЛМ', '5%', 'Промо', 
+        'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
+        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'Стилисты', 'К выплате'
+    ]
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=row_num, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+    row_num += 1
+    
+    # Итоговые суммы
+    totals = {
+        'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
+        'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
+        'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'stylist': 0, 'final_pay': 0
+    }
+    
+    # Данные
+    for payment in all_payments:
+        # Преобразуем дату
+        try:
+            year, month, day = payment['date'].split('-')
+            date_short = f"{day}.{month}.{year[2:]}"
+        except:
+            date_short = payment['date']
+        
+        # Получаем стилистов для этой даты и клуба
+        stylist_amount = stylist_by_date_club.get((payment['date'], payment['club']), 0)
+        
+        # Рассчитываем 10% и к выплате
+        vychet_10 = payment['debt'] * 0.1
+        k_vyplate = payment['debt_nal'] + payment['debt'] - vychet_10 - stylist_amount
+        
+        # Записываем строку
+        row_data = [
+            date_short,
+            payment['club'],
+            payment['code'],
+            payment['name'],
+            payment['stavka'],
+            payment['lm_3'],
+            payment['percent_5'],
+            payment['promo'],
+            payment['crz'],
+            payment['cons'],
+            payment['tips'],
+            payment['total_shift'],
+            payment['to_pay'],
+            payment['debt'],
+            vychet_10,
+            payment['debt_nal'],
+            stylist_amount,
+            k_vyplate
+        ]
+        
+        for col, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_num, column=col, value=value)
+            cell.border = border
+            if col > 4:  # Числовые столбцы
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Обновляем итоги
+        totals['stavka'] += payment['stavka']
+        totals['lm_3'] += payment['lm_3']
+        totals['percent_5'] += payment['percent_5']
+        totals['promo'] += payment['promo']
+        totals['crz'] += payment['crz']
+        totals['cons'] += payment['cons']
+        totals['tips'] += payment['tips']
+        totals['total_shift'] += payment['total_shift']
+        totals['to_pay'] += payment['to_pay']
+        totals['debt'] += payment['debt']
+        totals['debt_nal'] += payment['debt_nal']
+        totals['stylist'] += stylist_amount
+        totals['final_pay'] += k_vyplate
+        
+        row_num += 1
+    
+    # Строка ИТОГО
+    vychet_10_total = totals['debt'] * 0.1
+    
+    itogo_data = [
+        'ИТОГО', '', '', '',
+        totals['stavka'],
+        totals['lm_3'],
+        totals['percent_5'],
+        totals['promo'],
+        totals['crz'],
+        totals['cons'],
+        totals['tips'],
+        totals['total_shift'],
+        totals['to_pay'],
+        totals['debt'],
+        vychet_10_total,
+        totals['debt_nal'],
+        totals['stylist'],
+        totals['final_pay']
+    ]
+    
+    for col, value in enumerate(itogo_data, 1):
+        cell = ws.cell(row=row_num, column=col, value=value)
+        cell.font = Font(bold=True)
+        cell.border = border
+        if col > 4:
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+        else:
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    # Автоподгонка ширины
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        ws.column_dimensions[column_letter].width = min(max_length + 2, 20)
+    
+    # Сохраняем и отправляем
+    filename = f"zp_{code}_{date_from}_{date_to}.xlsx"
+    wb.save(filename)
+    
+    with open(filename, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=filename,
+            caption=f"💵 Отчёт ЗП: {code}\nПериод: {date_from} .. {date_to}"
+        )
+    
+    import os
+    os.remove(filename)
+
+
+async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_from: str, date_to: str):
+    """
+    Генерация Excel отчёта ЗП для всех сотрудников клуба(ов)
+    
+    Колонки те же что и для одного сотрудника
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from datetime import datetime, timedelta
+    
+    # Получаем все данные из БД
+    all_payments = []
+    for club in clubs:
+        club_payments = db.get_payments(club, date_from, date_to)
+        for row in club_payments:
+            payment_dict = {
+                'id': row[0],
+                'club': row[1],
+                'date': row[2],
+                'code': row[3],
+                'name': row[4],
+                'stavka': row[5],
+                'lm_3': row[6],
+                'percent_5': row[7],
+                'promo': row[8],
+                'crz': row[9],
+                'cons': row[10],
+                'tips': row[11],
+                'fines': row[12],
+                'total_shift': row[13],
+                'debt': row[14],
+                'debt_nal': row[15],
+                'to_pay': row[16],
+                'created_at': row[17]
+            }
+            all_payments.append(payment_dict)
+    
+    if not all_payments:
+        club_names = ', '.join(clubs)
+        await update.message.reply_text(
+            f"📊 Отчёт ЗП для клуба: {club_names}\n"
+            f"Период: {date_from} .. {date_to}\n\n"
+            f"❌ Данных нет в таблице payments.\n"
+            f"Загрузите данные через кнопку 'ЗАГРУЗИТЬ ЗП'"
+        )
+        return
+    
+    # Сортируем по дате, клубу и коду
+    all_payments.sort(key=lambda x: (x['date'], x['club'], x['code']))
+    
+    # Получаем расходы на стилистов
+    stylist_by_code_date_club = {}
+    for club in clubs:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT code, name, amount, period_from, period_to
+                FROM stylist_expenses
+                WHERE club = ?
+                  AND NOT (period_to < ? OR period_from > ?)
+            """, (club, date_from, date_to))
+            
+            rows = cursor.fetchall()
+            for row in rows:
+                exp_code, exp_name, exp_amount, period_from, period_to = row
+                start = datetime.strptime(period_from, '%Y-%m-%d')
+                end = datetime.strptime(period_to, '%Y-%m-%d')
+                days = (end - start).days + 1
+                daily_amount = exp_amount / days if days > 0 else exp_amount
+                
+                current = start
+                while current <= end:
+                    date_key = current.strftime('%Y-%m-%d')
+                    if date_key >= date_from and date_key <= date_to:
+                        key = (exp_code, date_key, club)
+                        stylist_by_code_date_club[key] = stylist_by_code_date_club.get(key, 0) + daily_amount
+                    current += timedelta(days=1)
+        except Exception as e:
+            print(f"Ошибка получения расходов на стилистов: {e}")
+        finally:
+            conn.close()
+    
+    # Создаём Excel
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ЗП"
+    
+    # Стили
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=10)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Заголовок
+    club_names = ', '.join(clubs)
+    ws['A1'] = f"Отчёт ЗП: {club_names}"
+    ws['A1'].font = Font(bold=True, size=14)
+    ws['A2'] = f"Период: {date_from} .. {date_to}"
+    ws['A2'].font = Font(size=11)
+    
+    row_num = 4
+    
+    # Шапка таблицы
+    headers = [
+        'Дата', 'Клуб', 'Код', 'Имя', 'Ставка', '3% ЛМ', '5%', 'Промо', 
+        'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
+        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'Стилисты', 'К выплате'
+    ]
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=row_num, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+    row_num += 1
+    
+    # Итоговые суммы
+    totals = {
+        'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
+        'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
+        'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'stylist': 0, 'final_pay': 0
+    }
+    
+    # Данные
+    for payment in all_payments:
+        # Преобразуем дату
+        try:
+            year, month, day = payment['date'].split('-')
+            date_short = f"{day}.{month}.{year[2:]}"
+        except:
+            date_short = payment['date']
+        
+        # Получаем стилистов
+        stylist_amount = stylist_by_code_date_club.get((payment['code'], payment['date'], payment['club']), 0)
+        
+        # Рассчитываем 10% и к выплате
+        vychet_10 = payment['debt'] * 0.1
+        k_vyplate = payment['debt_nal'] + payment['debt'] - vychet_10 - stylist_amount
+        
+        # Записываем строку
+        row_data = [
+            date_short,
+            payment['club'],
+            payment['code'],
+            payment['name'],
+            payment['stavka'],
+            payment['lm_3'],
+            payment['percent_5'],
+            payment['promo'],
+            payment['crz'],
+            payment['cons'],
+            payment['tips'],
+            payment['total_shift'],
+            payment['to_pay'],
+            payment['debt'],
+            vychet_10,
+            payment['debt_nal'],
+            stylist_amount,
+            k_vyplate
+        ]
+        
+        for col, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_num, column=col, value=value)
+            cell.border = border
+            if col > 4:
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Обновляем итоги
+        totals['stavka'] += payment['stavka']
+        totals['lm_3'] += payment['lm_3']
+        totals['percent_5'] += payment['percent_5']
+        totals['promo'] += payment['promo']
+        totals['crz'] += payment['crz']
+        totals['cons'] += payment['cons']
+        totals['tips'] += payment['tips']
+        totals['total_shift'] += payment['total_shift']
+        totals['to_pay'] += payment['to_pay']
+        totals['debt'] += payment['debt']
+        totals['debt_nal'] += payment['debt_nal']
+        totals['stylist'] += stylist_amount
+        totals['final_pay'] += k_vyplate
+        
+        row_num += 1
+    
+    # Строка ИТОГО
+    vychet_10_total = totals['debt'] * 0.1
+    
+    itogo_data = [
+        'ИТОГО', '', '', '',
+        totals['stavka'],
+        totals['lm_3'],
+        totals['percent_5'],
+        totals['promo'],
+        totals['crz'],
+        totals['cons'],
+        totals['tips'],
+        totals['total_shift'],
+        totals['to_pay'],
+        totals['debt'],
+        vychet_10_total,
+        totals['debt_nal'],
+        totals['stylist'],
+        totals['final_pay']
+    ]
+    
+    for col, value in enumerate(itogo_data, 1):
+        cell = ws.cell(row=row_num, column=col, value=value)
+        cell.font = Font(bold=True)
+        cell.border = border
+        if col > 4:
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+        else:
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    # Автоподгонка ширины
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        ws.column_dimensions[column_letter].width = min(max_length + 2, 20)
+    
+    # Сохраняем и отправляем
+    club_str = '_'.join([c.lower() for c in clubs])
+    filename = f"zp_{club_str}_{date_from}_{date_to}.xlsx"
+    wb.save(filename)
+    
+    with open(filename, 'rb') as f:
+        await update.message.reply_document(
+            document=f,
+            filename=filename,
+            caption=f"💵 Отчёт ЗП: {club_names}\nПериод: {date_from} .. {date_to}"
+        )
+    
+    import os
+    os.remove(filename)
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка нажатий на inline кнопки"""
     query = update.callback_query
@@ -5687,7 +6379,79 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔒 Требуется авторизация")
         return
     
-    # Проверяем что мы в режиме ожидания файла
+    # Проверяем режим загрузки (обычный файл или ЗП)
+    if state.mode == 'awaiting_payments_upload_file':
+        # Обработка загрузки ЛИСТА ВЫПЛАТ
+        document = update.message.document
+        
+        # Проверяем что это Excel файл
+        if not (document.file_name.endswith('.xlsx') or document.file_name.endswith('.xls')):
+            await update.message.reply_text(
+                "❌ Поддерживаются только Excel файлы (.xlsx, .xls)\n"
+                "Отправьте правильный файл или напишите: отмена"
+            )
+            return
+        
+        await update.message.reply_text("⏳ Обрабатываю лист выплат...")
+        
+        try:
+            # Скачиваем файл
+            file = await context.bot.get_file(document.file_id)
+            file_bytes = await file.download_as_bytearray()
+            
+            # Парсим ЛИСТ ВЫПЛАТ
+            excel_processor = ExcelProcessor()
+            payments_data = excel_processor.extract_payments_sheet(
+                bytes(file_bytes), 
+                db, 
+                state.payments_upload_club
+            )
+            
+            if not payments_data:
+                await update.message.reply_text(
+                    "❌ Не найден лист 'ЛИСТ ВЫПЛАТ' в файле\n"
+                    "или он пустой.\n\n"
+                    "Проверьте файл и попробуйте снова\n"
+                    "или напишите: отмена"
+                )
+                return
+            
+            # Показываем предпросмотр
+            preview_lines = [
+                f"💰 ПРЕДПРОСМОТР ВЫПЛАТ\n",
+                f"🏢 Клуб: {state.payments_upload_club}\n",
+                f"📅 Дата: {state.payments_upload_date}\n",
+                f"📊 Найдено записей: {len(payments_data)}\n\n"
+            ]
+            
+            # Показываем первые 10 записей
+            for i, pay in enumerate(payments_data[:10], 1):
+                preview_lines.append(
+                    f"{i}. {pay['code']} {pay['name']} - ИТОГО: {pay['total_shift']}\n"
+                )
+            
+            if len(payments_data) > 10:
+                preview_lines.append(f"\n... и ещё {len(payments_data) - 10} записей\n")
+            
+            preview_lines.append("\n✅ Для сохранения напишите: СОХРАНИТЬ\n")
+            preview_lines.append("❌ Для отмены: ОТМЕНА")
+            
+            await update.message.reply_text(''.join(preview_lines))
+            
+            # Сохраняем данные в state
+            state.payments_upload_data = payments_data
+            state.mode = 'awaiting_payments_save_confirm'
+            
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ Ошибка обработки файла: {str(e)}\n\n"
+                f"Попробуйте снова или напишите: отмена"
+            )
+            state.mode = None
+        
+        return
+    
+    # Обычная загрузка файла (Примечания)
     if state.mode != 'awaiting_upload_file':
         return
     

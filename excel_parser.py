@@ -166,4 +166,121 @@ class ExcelProcessor:
             'нал': with_cash,
             'extra': extra_notes
         }
+    
+    def extract_payments_sheet(self, file_content: bytes, db, club: str) -> List[Dict[str, Any]]:
+        """
+        Извлечение данных из листа 'ЛИСТ ВЫПЛАТ'
+        
+        Структура листа:
+        - Столбец A: категория (Д, Оф, Г, Н, Б, К, Dj, М, А, Лм, СБ)
+        - Столбец B: номер
+        - Столбец C: имя
+        - Столбец D: СТАВКА
+        - Столбец E: 3% ЛМ
+        - Столбец F: 5%
+        - Столбец G: ПРОМО
+        - Столбец H: CRAZY MENU
+        - Столбец I: Консумация
+        - Столбец J: ЧАЕВЫЕ
+        - Столбец K: ШТРАФЫ
+        - Столбец L: ИТОГО выплат на смене
+        - Столбец M: ДОЛГ
+        - Столбец N: ДОЛГ НАЛ
+        - Столбец O: к выплате
+        
+        Args:
+            file_content: содержимое Excel файла
+            db: объект Database для проверки объединений сотрудников
+            club: название клуба (Москвич/Анора)
+        
+        Returns:
+            Список словарей с данными по каждому сотруднику
+        """
+        try:
+            # Читаем лист "ЛИСТ ВЫПЛАТ"
+            df = pd.read_excel(io.BytesIO(file_content), sheet_name='ЛИСТ ВЫПЛАТ', header=None, engine='openpyxl')
+        except Exception as e:
+            logger.error(f"Error reading 'ЛИСТ ВЫПЛАТ': {e}")
+            return []
+        
+        if df.empty:
+            return []
+        
+        payments = []
+        
+        # Проходим по строкам (пропускаем первые 2 строки с заголовками)
+        for row_idx in range(2, len(df)):
+            try:
+                # Столбцы A и B - код
+                category = df.iloc[row_idx, 0]  # A
+                number = df.iloc[row_idx, 1]    # B
+                
+                # Пропускаем пустые строки
+                if pd.isna(category) or pd.isna(number):
+                    continue
+                
+                category = str(category).strip()
+                number = str(number).strip()
+                
+                # Пропускаем строки-заголовки (где number не число)
+                if not number.replace('.', '').replace(',', '').isdigit():
+                    continue
+                
+                code = f"{category}{number}"
+                
+                # Имя из столбца C
+                name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
+                name = str(name).strip()
+                
+                # ПРОВЕРКА ОБЪЕДИНЕНИЙ В БД
+                merge_info = db.check_employee_merge(club, code, name)
+                if merge_info:
+                    code = merge_info['merged_code']
+                    name = merge_info['merged_name']
+                else:
+                    existing_names = db.get_employee_names_by_code(club, code)
+                    if existing_names:
+                        name = existing_names[0]
+                
+                # Извлекаем числовые данные
+                stavka = self._parse_decimal(df.iloc[row_idx, 3])       # D
+                lm_3 = self._parse_decimal(df.iloc[row_idx, 4])         # E
+                percent_5 = self._parse_decimal(df.iloc[row_idx, 5])    # F
+                promo = self._parse_decimal(df.iloc[row_idx, 6])        # G
+                crz = self._parse_decimal(df.iloc[row_idx, 7])          # H
+                cons = self._parse_decimal(df.iloc[row_idx, 8])         # I
+                tips = self._parse_decimal(df.iloc[row_idx, 9])         # J
+                fines = self._parse_decimal(df.iloc[row_idx, 10])       # K
+                total_shift = self._parse_decimal(df.iloc[row_idx, 11]) # L
+                debt = self._parse_decimal(df.iloc[row_idx, 12])        # M (Долг БН)
+                debt_nal = self._parse_decimal(df.iloc[row_idx, 13])    # N (Долг НАЛ)
+                to_pay = self._parse_decimal(df.iloc[row_idx, 14])      # O (получила на смене)
+                
+                # Пропускаем строки где все значения = 0
+                if all(v == 0 for v in [stavka, lm_3, percent_5, promo, crz, cons, tips, total_shift]):
+                    continue
+                
+                payments.append({
+                    'code': code,
+                    'name': name,
+                    'stavka': stavka,
+                    'lm_3': lm_3,
+                    'percent_5': percent_5,
+                    'promo': promo,
+                    'crz': crz,
+                    'cons': cons,
+                    'tips': tips,
+                    'fines': fines,
+                    'total_shift': total_shift,
+                    'debt': debt,
+                    'debt_nal': debt_nal,
+                    'to_pay': to_pay
+                })
+                
+            except Exception as e:
+                logger.error(f"Error parsing payment row {row_idx}: {e}")
+                continue
+        
+        logger.info(f"Extracted {len(payments)} payment records from 'ЛИСТ ВЫПЛАТ'")
+        return payments
 
