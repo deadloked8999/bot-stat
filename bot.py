@@ -4510,10 +4510,19 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     # Сортируем по дате, клубу и коду
     all_payments.sort(key=lambda x: (x['date'], x['club'], x['code']))
     
+    # Группируем по дате
+    payments_by_date = {}
+    for payment in all_payments:
+        date = payment['date']
+        if date not in payments_by_date:
+            payments_by_date[date] = []
+        payments_by_date[date].append(payment)
+    
     # Создаём Excel
     wb = Workbook()
-    ws = wb.active
-    ws.title = "ЗП"
+    wb.remove(wb.active)  # Удаляем дефолтный лист
+    
+    club_names = ', '.join(clubs)  # Определяем для использования в create_sheet
     
     # Стили
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -4525,15 +4534,6 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         bottom=Side(style='thin')
     )
     
-    # Заголовок
-    club_names = ', '.join(clubs)
-    ws['A1'] = f"Отчёт ЗП: {club_names}"
-    ws['A1'].font = Font(bold=True, size=14)
-    ws['A2'] = f"Период: {date_from} .. {date_to}"
-    ws['A2'].font = Font(size=11)
-    
-    row_num = 4
-    
     # Шапка таблицы
     headers = [
         'Дата', 'Клуб', 'Код', 'Имя', 'Ставка', '3% ЛМ', '5%', 'Промо', 
@@ -4541,64 +4541,239 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
     ]
     
+    # Функция для создания листа с данными
+    def create_sheet(ws, title, payments_list, show_date_col=True):
+        ws.title = title
+        ws['A1'] = f"Отчёт ЗП: {club_names}"
+        ws['A1'].font = Font(bold=True, size=14)
+        ws['A2'] = f"Период: {date_from} .. {date_to}"
+        ws['A2'].font = Font(size=11)
+        
+        row_num = 4
+        
+        # Шапка таблицы
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=row_num, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
+        row_num += 1
+        
+        # Итоговые суммы
+        totals = {
+            'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
+            'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
+            'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'final_pay': 0
+        }
+        
+        # Данные
+        for payment in payments_list:
+            # Преобразуем дату
+            try:
+                year, month, day = payment['date'].split('-')
+                date_short = f"{day}.{month}.{year[2:]}"
+            except:
+                date_short = payment['date']
+            
+            # Рассчитываем 10% и к выплате
+            vychet_10 = round(payment['debt'] * 0.1)  # Округление до целого
+            k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
+            
+            # Обработка кода для отображения
+            display_code = payment['code']
+            if display_code.startswith('СБ-'):
+                display_code = 'СБ'  # Убираем имя из кода для отображения
+            elif display_code.startswith('Уборщица'):
+                display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
+            
+            # Записываем строку
+            row_data = [
+                date_short if show_date_col else '',
+                payment['club'],
+                display_code,  # Используем обработанный код
+                payment['name'],
+                payment['stavka'],
+                payment['lm_3'],
+                payment['percent_5'],
+                payment['promo'],
+                payment['crz'],
+                payment['cons'],
+                payment['tips'],
+                payment['total_shift'],
+                payment['to_pay'],
+                payment['debt'],
+                vychet_10,
+                payment['debt_nal'],
+                k_vyplate  # БЕЗ stylist_amount
+            ]
+            
+            for col, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_num, column=col, value=value)
+                cell.border = border
+                if col > 4:
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Обновляем итоги
+            totals['stavka'] += payment['stavka']
+            totals['lm_3'] += payment['lm_3']
+            totals['percent_5'] += payment['percent_5']
+            totals['promo'] += payment['promo']
+            totals['crz'] += payment['crz']
+            totals['cons'] += payment['cons']
+            totals['tips'] += payment['tips']
+            totals['total_shift'] += payment['total_shift']
+            totals['to_pay'] += payment['to_pay']
+            totals['debt'] += payment['debt']
+            totals['debt_nal'] += payment['debt_nal']
+            totals['final_pay'] += k_vyplate
+            
+            row_num += 1
+        
+        # Строка ИТОГО
+        vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
+        
+        itogo_data = [
+            'ИТОГО', '', '', '',
+            totals['stavka'],
+            totals['lm_3'],
+            totals['percent_5'],
+            totals['promo'],
+            totals['crz'],
+            totals['cons'],
+            totals['tips'],
+            totals['total_shift'],
+            totals['to_pay'],
+            totals['debt'],
+            vychet_10_total,
+            totals['debt_nal'],
+            round(totals['final_pay'])  # Округление до целого
+        ]
+        
+        for col, value in enumerate(itogo_data, 1):
+            cell = ws.cell(row=row_num, column=col, value=value)
+            cell.font = Font(bold=True)
+            cell.border = border
+            if col > 4:
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Автоподгонка ширины
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                except:
+                    pass
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 20)
+        
+        return totals
+    
+    # Создаём лист для каждой даты
+    for date in sorted(payments_by_date.keys()):
+        try:
+            year, month, day = date.split('-')
+            sheet_name = f"{day}.{month}.{year[2:]}"
+        except:
+            sheet_name = date
+        
+        ws = wb.create_sheet(title=sheet_name)
+        create_sheet(ws, sheet_name, payments_by_date[date], show_date_col=True)
+    
+    # Создаём лист ИТОГО с группировкой по (код, имя)
+    employee_totals = {}
+    for payment in all_payments:
+        # Обработка кода для отображения
+        display_code = payment['code']
+        if display_code.startswith('СБ-'):
+            display_code = 'СБ'
+        elif display_code.startswith('Уборщица'):
+            display_code = 'Уборщица'
+        
+        key = (display_code, payment['name'])
+        if key not in employee_totals:
+            employee_totals[key] = {
+                'code': display_code,
+                'name': payment['name'],
+                'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
+                'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
+                'to_pay': 0, 'debt': 0, 'debt_nal': 0
+            }
+        
+        employee_totals[key]['stavka'] += payment['stavka']
+        employee_totals[key]['lm_3'] += payment['lm_3']
+        employee_totals[key]['percent_5'] += payment['percent_5']
+        employee_totals[key]['promo'] += payment['promo']
+        employee_totals[key]['crz'] += payment['crz']
+        employee_totals[key]['cons'] += payment['cons']
+        employee_totals[key]['tips'] += payment['tips']
+        employee_totals[key]['total_shift'] += payment['total_shift']
+        employee_totals[key]['to_pay'] += payment['to_pay']
+        employee_totals[key]['debt'] += payment['debt']
+        employee_totals[key]['debt_nal'] += payment['debt_nal']
+    
+    # Создаём лист ИТОГО
+    ws_itogo = wb.create_sheet(title="ИТОГО")
+    club_names = ', '.join(clubs)
+    ws_itogo['A1'] = f"Отчёт ЗП: {club_names}"
+    ws_itogo['A1'].font = Font(bold=True, size=14)
+    ws_itogo['A2'] = f"Период: {date_from} .. {date_to}"
+    ws_itogo['A2'].font = Font(size=11)
+    
+    row_num = 4
+    
+    # Шапка таблицы
     for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=row_num, column=col, value=header)
+        cell = ws_itogo.cell(row=row_num, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', vertical='center')
         cell.border = border
     row_num += 1
     
-    # Итоговые суммы
-    totals = {
+    # Итоговые суммы для листа ИТОГО
+    grand_totals = {
         'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
         'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
         'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'final_pay': 0
     }
     
-    # Данные
-    for payment in all_payments:
-        # Преобразуем дату
-        try:
-            year, month, day = payment['date'].split('-')
-            date_short = f"{day}.{month}.{year[2:]}"
-        except:
-            date_short = payment['date']
+    # Данные по сотрудникам
+    for key in sorted(employee_totals.keys()):
+        emp = employee_totals[key]
         
         # Рассчитываем 10% и к выплате
-        vychet_10 = round(payment['debt'] * 0.1)  # Округление до целого
-        k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
+        vychet_10 = round(emp['debt'] * 0.1)  # Округление до целого
+        k_vyplate = round(emp['debt_nal'] + emp['debt'] - vychet_10)
         
-        # Обработка кода для отображения
-        display_code = payment['code']
-        if display_code.startswith('СБ-'):
-            display_code = 'СБ'  # Убираем имя из кода для отображения
-        elif display_code.startswith('Уборщица'):
-            display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
-        
-        # Записываем строку
         row_data = [
-            date_short,
-            payment['club'],
-            display_code,  # Используем обработанный код
-            payment['name'],
-            payment['stavka'],
-            payment['lm_3'],
-            payment['percent_5'],
-            payment['promo'],
-            payment['crz'],
-            payment['cons'],
-            payment['tips'],
-            payment['total_shift'],
-            payment['to_pay'],
-            payment['debt'],
+            '',  # Дата пустая в ИТОГО
+            '',  # Клуб пустой в ИТОГО
+            emp['code'],
+            emp['name'],
+            emp['stavka'],
+            emp['lm_3'],
+            emp['percent_5'],
+            emp['promo'],
+            emp['crz'],
+            emp['cons'],
+            emp['tips'],
+            emp['total_shift'],
+            emp['to_pay'],
+            emp['debt'],
             vychet_10,
-            payment['debt_nal'],
-            k_vyplate  # БЕЗ stylist_amount
+            emp['debt_nal'],
+            k_vyplate
         ]
         
         for col, value in enumerate(row_data, 1):
-            cell = ws.cell(row=row_num, column=col, value=value)
+            cell = ws_itogo.cell(row=row_num, column=col, value=value)
             cell.border = border
             if col > 4:
                 cell.alignment = Alignment(horizontal='right', vertical='center')
@@ -4606,43 +4781,43 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         
         # Обновляем итоги
-        totals['stavka'] += payment['stavka']
-        totals['lm_3'] += payment['lm_3']
-        totals['percent_5'] += payment['percent_5']
-        totals['promo'] += payment['promo']
-        totals['crz'] += payment['crz']
-        totals['cons'] += payment['cons']
-        totals['tips'] += payment['tips']
-        totals['total_shift'] += payment['total_shift']
-        totals['to_pay'] += payment['to_pay']
-        totals['debt'] += payment['debt']
-        totals['debt_nal'] += payment['debt_nal']
-        totals['final_pay'] += k_vyplate
+        grand_totals['stavka'] += emp['stavka']
+        grand_totals['lm_3'] += emp['lm_3']
+        grand_totals['percent_5'] += emp['percent_5']
+        grand_totals['promo'] += emp['promo']
+        grand_totals['crz'] += emp['crz']
+        grand_totals['cons'] += emp['cons']
+        grand_totals['tips'] += emp['tips']
+        grand_totals['total_shift'] += emp['total_shift']
+        grand_totals['to_pay'] += emp['to_pay']
+        grand_totals['debt'] += emp['debt']
+        grand_totals['debt_nal'] += emp['debt_nal']
+        grand_totals['final_pay'] += k_vyplate
         
         row_num += 1
     
-    # Строка ИТОГО
-    vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
+    # Строка ИТОГО в листе ИТОГО
+    vychet_10_grand = round(grand_totals['debt'] * 0.1)  # Округление до целого
     
     itogo_data = [
         'ИТОГО', '', '', '',
-        totals['stavka'],
-        totals['lm_3'],
-        totals['percent_5'],
-        totals['promo'],
-        totals['crz'],
-        totals['cons'],
-        totals['tips'],
-        totals['total_shift'],
-        totals['to_pay'],
-        totals['debt'],
-        vychet_10_total,
-        totals['debt_nal'],
-        round(totals['final_pay'])  # Округление до целого
+        grand_totals['stavka'],
+        grand_totals['lm_3'],
+        grand_totals['percent_5'],
+        grand_totals['promo'],
+        grand_totals['crz'],
+        grand_totals['cons'],
+        grand_totals['tips'],
+        grand_totals['total_shift'],
+        grand_totals['to_pay'],
+        grand_totals['debt'],
+        vychet_10_grand,
+        grand_totals['debt_nal'],
+        round(grand_totals['final_pay'])  # Округление до целого
     ]
     
     for col, value in enumerate(itogo_data, 1):
-        cell = ws.cell(row=row_num, column=col, value=value)
+        cell = ws_itogo.cell(row=row_num, column=col, value=value)
         cell.font = Font(bold=True)
         cell.border = border
         if col > 4:
@@ -4650,8 +4825,8 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         else:
             cell.alignment = Alignment(horizontal='center', vertical='center')
     
-    # Автоподгонка ширины
-    for column in ws.columns:
+    # Автоподгонка ширины для листа ИТОГО
+    for column in ws_itogo.columns:
         max_length = 0
         column_letter = column[0].column_letter
         for cell in column:
@@ -4660,7 +4835,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                     max_length = max(max_length, len(str(cell.value)))
             except:
                 pass
-        ws.column_dimensions[column_letter].width = min(max_length + 2, 20)
+        ws_itogo.column_dimensions[column_letter].width = min(max_length + 2, 20)
     
     # Сохраняем и отправляем
     club_str = '_'.join([c.lower() for c in clubs])
