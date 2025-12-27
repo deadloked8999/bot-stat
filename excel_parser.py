@@ -258,6 +258,7 @@ class ExcelProcessor:
                         break
                 
                 if should_stop:
+                    print(f"DEBUG: Breaking at row {row_idx} due to stop word")
                     break
                 
                 # Столбцы A и B - код
@@ -358,11 +359,15 @@ class ExcelProcessor:
                     'debt_nal': debt_nal,
                     'to_pay': to_pay
                 })
+                print(f"DEBUG: Added payment row {row_idx}: code={code}, name={name}")
                 
             except Exception as e:
                 logger.error(f"Error parsing payment row {row_idx}: {e}")
+                print(f"DEBUG: Exception at row {row_idx}: {e}")
                 continue
         
         logger.info(f"Extracted {len(payments)} payment records from 'ЛИСТ ВЫПЛАТ'")
+        print(f"DEBUG: Total payments extracted: {len(payments)}")
+        print(f"DEBUG: Payment codes: {[p['code'] for p in payments]}")
         return payments
 
