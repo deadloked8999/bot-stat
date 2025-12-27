@@ -218,14 +218,14 @@ class ExcelProcessor:
             df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name, header=None, engine='openpyxl')
             
             # Печатаем первые 30 строк для отладки
-            logger.info("=== DEBUG: First 30 rows of sheet ===")
+            print("=== DEBUG: First 30 rows of sheet ===")
             for idx in range(min(30, len(df))):
                 row_data = []
                 for col_idx in range(min(5, df.shape[1])):
                     cell = df.iloc[idx, col_idx]
                     row_data.append(str(cell)[:20] if not pd.isna(cell) else "")
-                logger.info(f"Row {idx}: {row_data}")
-            logger.info("=== END DEBUG ===")
+                print(f"Row {idx}: {row_data}")
+            print("=== END DEBUG ===")
             
         except Exception as e:
             logger.error(f"Error reading payments sheet: {e}")
@@ -250,7 +250,7 @@ class ExcelProcessor:
                         cell_str = str(cell).strip().lower()
                         for stop_word in stop_words:
                             if stop_word in cell_str:
-                                logger.info(f"Found stop word '{stop_word}' at row {row_idx}, col {col_idx}, stopping parsing")
+                                print(f"Found stop word '{stop_word}' at row {row_idx}, col {col_idx}, stopping parsing")
                                 # Используем флаг для выхода из внешнего цикла
                                 should_stop = True
                                 break
