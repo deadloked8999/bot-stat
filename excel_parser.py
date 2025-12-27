@@ -233,26 +233,51 @@ class ExcelProcessor:
                 category = df.iloc[row_idx, 0]  # A
                 number = df.iloc[row_idx, 1]    # B
                 
-                # Пропускаем пустые строки
-                if pd.isna(category) or pd.isna(number):
-                    continue
+                category = str(category).strip() if not pd.isna(category) else ""
+                number = str(number).strip() if not pd.isna(number) else ""
                 
-                category = str(category).strip()
-                number = str(number).strip()
-                # Убираем .0 если число было прочитано как float
-                if '.' in number:
+                # Убираем .0 из номера если есть
+                if number and '.' in number:
                     try:
                         number = str(int(float(number)))
                     except:
                         pass
                 
-                # Пропускаем строки-заголовки (где number не число)
-                if not number.replace('.', '').replace(',', '').isdigit():
+                # ГЕНЕРАЦИЯ КОДА
+                # 1. Есть категория + номер (и номер - это цифры)
+                if category and number and number.replace('.', '').replace(',', '').isdigit():
+                    code = f"{category}{number}"
+                
+                # 2. Есть категория, НЕТ номера
+                elif category and not number:
+                    # Берём ПОЛНОЕ имя из столбца C
+                    name_full = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
+                    name_full = str(name_full).strip()
+                    
+                    if name_full:
+                        code = f"{category}-{name_full}"
+                    else:
+                        # Нет имени - пропускаем
+                        continue
+                
+                # 3. НЕТ категории (A пусто)
+                elif not category:
+                    # Берём первое слово из имени
+                    name_full = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
+                    name_full = str(name_full).strip()
+                    
+                    if name_full:
+                        first_word = name_full.split()[0]
+                        code = first_word
+                    else:
+                        # Нет имени - пропускаем
+                        continue
+                
+                else:
+                    # Не подходит ни под один вариант - пропускаем
                     continue
                 
-                code = f"{category}{number}"
-                
-                # Имя из столбца C
+                # Имя из столбца C (уже получали выше, но нужно убедиться что оно есть)
                 name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
                 name = str(name).strip()
                 
