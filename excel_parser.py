@@ -305,12 +305,9 @@ class ExcelProcessor:
                     # Не подходит ни под один вариант - пропускаем
                     continue
                 
-                # Имя всегда берём из столбца C
-                if 'name_full' in locals():
-                    name = name_full
-                else:
-                    name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
-                    name = str(name).strip()
+                # Имя ВСЕГДА берём из столбца C (независимо от типа кода)
+                name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
+                name = str(name).strip()
                 
                 # ПРОВЕРКА ОБЪЕДИНЕНИЙ В БД
                 merge_info = db.check_employee_merge(club, code, name)
