@@ -4094,7 +4094,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     
     Колонки в Excel:
     Дата | Код | Имя | Ставка | 3% ЛМ | 5% | Промо | CRZ | Cons | Чаевые | 
-    ИТОГО выплат | Получила на смене | Долг БН | 10% (вычет) | Долг НАЛ | Стилисты | К выплате
+    ИТОГО выплат | Получила на смене | Долг БН | 10% (вычет) | Долг НАЛ | К выплате
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -4142,44 +4142,6 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     # Сортируем по дате и клубу
     all_payments.sort(key=lambda x: (x['date'], x['club']))
     
-    # Получаем расходы на стилистов напрямую из БД с периодами
-    stylist_by_date_club = {}
-    from datetime import datetime, timedelta
-    for club in ['Москвич', 'Анора']:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        try:
-            # Получаем расходы с периодами для пересекающихся дат
-            cursor.execute("""
-                SELECT code, name, amount, period_from, period_to
-                FROM stylist_expenses
-                WHERE club = ? AND code = ?
-                  AND NOT (period_to < ? OR period_from > ?)
-            """, (club, code, date_from, date_to))
-            
-            rows = cursor.fetchall()
-            for row in rows:
-                exp_code, exp_name, exp_amount, period_from, period_to = row
-                # Распределяем расход на даты периода
-                # Для простоты берём среднее значение на каждый день
-                start = datetime.strptime(period_from, '%Y-%m-%d')
-                end = datetime.strptime(period_to, '%Y-%m-%d')
-                days = (end - start).days + 1
-                daily_amount = exp_amount / days if days > 0 else exp_amount
-                
-                current = start
-                while current <= end:
-                    date_key = current.strftime('%Y-%m-%d')
-                    # Учитываем только даты в запрошенном периоде
-                    if date_key >= date_from and date_key <= date_to:
-                        club_key = (date_key, club)
-                        stylist_by_date_club[club_key] = stylist_by_date_club.get(club_key, 0) + daily_amount
-                    current += timedelta(days=1)
-        except Exception as e:
-            print(f"Ошибка получения расходов на стилистов: {e}")
-        finally:
-            conn.close()
-    
     # Создаём Excel
     wb = Workbook()
     ws = wb.active
@@ -4207,7 +4169,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     headers = [
         'Дата', 'Клуб', 'Код', 'Имя', 'Ставка', '3% ЛМ', '5%', 'Промо', 
         'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
-        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'Стилисты', 'К выплате'
+        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
     ]
     
     for col, header in enumerate(headers, 1):
@@ -4222,7 +4184,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     totals = {
         'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
         'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
-        'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'stylist': 0, 'final_pay': 0
+        'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'final_pay': 0
     }
     
     # Данные
@@ -4234,12 +4196,9 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         except:
             date_short = payment['date']
         
-        # Получаем стилистов для этой даты и клуба
-        stylist_amount = stylist_by_date_club.get((payment['date'], payment['club']), 0)
-        
         # Рассчитываем 10% и к выплате
-        vychet_10 = payment['debt'] * 0.1
-        k_vyplate = payment['debt_nal'] + payment['debt'] - vychet_10 - stylist_amount
+        vychet_10 = round(payment['debt'] * 0.1)  # Округление до целого
+        k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
         
         # Записываем строку
         row_data = [
@@ -4259,8 +4218,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
             payment['debt'],
             vychet_10,
             payment['debt_nal'],
-            stylist_amount,
-            k_vyplate
+            k_vyplate  # БЕЗ stylist_amount
         ]
         
         for col, value in enumerate(row_data, 1):
@@ -4283,13 +4241,12 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         totals['to_pay'] += payment['to_pay']
         totals['debt'] += payment['debt']
         totals['debt_nal'] += payment['debt_nal']
-        totals['stylist'] += stylist_amount
         totals['final_pay'] += k_vyplate
         
         row_num += 1
     
     # Строка ИТОГО
-    vychet_10_total = totals['debt'] * 0.1
+    vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
     
     itogo_data = [
         'ИТОГО', '', '', '',
@@ -4305,8 +4262,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         totals['debt'],
         vychet_10_total,
         totals['debt_nal'],
-        totals['stylist'],
-        totals['final_pay']
+        round(totals['final_pay'])  # Округление до целого
     ]
     
     for col, value in enumerate(itogo_data, 1):
@@ -4353,7 +4309,6 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from datetime import datetime, timedelta
     
     # Получаем все данные из БД
     all_payments = []
@@ -4395,39 +4350,6 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     # Сортируем по дате, клубу и коду
     all_payments.sort(key=lambda x: (x['date'], x['club'], x['code']))
     
-    # Получаем расходы на стилистов
-    stylist_by_code_date_club = {}
-    for club in clubs:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        try:
-            cursor.execute("""
-                SELECT code, name, amount, period_from, period_to
-                FROM stylist_expenses
-                WHERE club = ?
-                  AND NOT (period_to < ? OR period_from > ?)
-            """, (club, date_from, date_to))
-            
-            rows = cursor.fetchall()
-            for row in rows:
-                exp_code, exp_name, exp_amount, period_from, period_to = row
-                start = datetime.strptime(period_from, '%Y-%m-%d')
-                end = datetime.strptime(period_to, '%Y-%m-%d')
-                days = (end - start).days + 1
-                daily_amount = exp_amount / days if days > 0 else exp_amount
-                
-                current = start
-                while current <= end:
-                    date_key = current.strftime('%Y-%m-%d')
-                    if date_key >= date_from and date_key <= date_to:
-                        key = (exp_code, date_key, club)
-                        stylist_by_code_date_club[key] = stylist_by_code_date_club.get(key, 0) + daily_amount
-                    current += timedelta(days=1)
-        except Exception as e:
-            print(f"Ошибка получения расходов на стилистов: {e}")
-        finally:
-            conn.close()
-    
     # Создаём Excel
     wb = Workbook()
     ws = wb.active
@@ -4456,7 +4378,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     headers = [
         'Дата', 'Клуб', 'Код', 'Имя', 'Ставка', '3% ЛМ', '5%', 'Промо', 
         'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
-        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'Стилисты', 'К выплате'
+        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
     ]
     
     for col, header in enumerate(headers, 1):
@@ -4471,7 +4393,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     totals = {
         'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
         'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
-        'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'stylist': 0, 'final_pay': 0
+        'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'final_pay': 0
     }
     
     # Данные
@@ -4483,12 +4405,9 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         except:
             date_short = payment['date']
         
-        # Получаем стилистов
-        stylist_amount = stylist_by_code_date_club.get((payment['code'], payment['date'], payment['club']), 0)
-        
         # Рассчитываем 10% и к выплате
-        vychet_10 = payment['debt'] * 0.1
-        k_vyplate = payment['debt_nal'] + payment['debt'] - vychet_10 - stylist_amount
+        vychet_10 = round(payment['debt'] * 0.1)  # Округление до целого
+        k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
         
         # Записываем строку
         row_data = [
@@ -4508,8 +4427,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             payment['debt'],
             vychet_10,
             payment['debt_nal'],
-            stylist_amount,
-            k_vyplate
+            k_vyplate  # БЕЗ stylist_amount
         ]
         
         for col, value in enumerate(row_data, 1):
@@ -4532,13 +4450,12 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         totals['to_pay'] += payment['to_pay']
         totals['debt'] += payment['debt']
         totals['debt_nal'] += payment['debt_nal']
-        totals['stylist'] += stylist_amount
         totals['final_pay'] += k_vyplate
         
         row_num += 1
     
     # Строка ИТОГО
-    vychet_10_total = totals['debt'] * 0.1
+    vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
     
     itogo_data = [
         'ИТОГО', '', '', '',
@@ -4554,8 +4471,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         totals['debt'],
         vychet_10_total,
         totals['debt_nal'],
-        totals['stylist'],
-        totals['final_pay']
+        round(totals['final_pay'])  # Округление до целого
     ]
     
     for col, value in enumerate(itogo_data, 1):
