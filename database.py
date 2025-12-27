@@ -985,6 +985,62 @@ class Database:
         
         return rows
     
+    def fix_payment_codes(self):
+        """
+        Исправить коды в таблице payments (убрать .0 из номеров)
+        Например: Н8.0 → Н8, Оф12.0 → Оф12
+        
+        Returns:
+            Количество исправленных записей
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Получаем все записи
+            cursor.execute("SELECT id, code FROM payments")
+            rows = cursor.fetchall()
+            
+            fixed_count = 0
+            
+            for row_id, code in rows:
+                # Проверяем есть ли .0 в коде
+                if '.0' in code or '.' in code:
+                    # Разбиваем на категорию и номер
+                    import re
+                    match = re.match(r'([А-Яа-яA-Za-z]+)(.+)', code)
+                    if match:
+                        category = match.group(1)
+                        number_str = match.group(2).strip()
+                        
+                        # Преобразуем номер
+                        try:
+                            # Убираем .0
+                            if '.' in number_str:
+                                number = int(float(number_str))
+                                new_code = f"{category}{number}"
+                                
+                                # Обновляем в БД
+                                cursor.execute(
+                                    "UPDATE payments SET code = ? WHERE id = ?",
+                                    (new_code, row_id)
+                                )
+                                fixed_count += 1
+                                print(f"Исправлено: {code} → {new_code}")
+                        except:
+                            pass
+            
+            conn.commit()
+            print(f"Всего исправлено записей: {fixed_count}")
+            return fixed_count
+            
+        except Exception as e:
+            print(f"Ошибка исправления кодов: {e}")
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+    
     def get_stylist_expenses_periods(self, club: str) -> List[Dict]:
         """
         Получить все периоды расходов на стилистов для клуба

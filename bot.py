@@ -658,6 +658,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
     
+    # Секретная команда для исправления кодов в payments
+    if text_lower == 'fix payments':
+        await update.message.reply_text("⏳ Исправляю коды в таблице payments...")
+        
+        fixed_count = db.fix_payment_codes()
+        
+        await update.message.reply_text(
+            f"✅ Исправление завершено!\n"
+            f"Обновлено записей: {fixed_count}"
+        )
+        return
+    
     # Команда "завершить" - выход из сессии
     if text_lower == 'завершить' or text_lower == '🚪 завершить':
         # Удаляем сообщения бота (последние сохранённые)
