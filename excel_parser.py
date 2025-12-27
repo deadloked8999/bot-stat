@@ -229,6 +229,23 @@ class ExcelProcessor:
         # Проходим по строкам (пропускаем первые 2 строки с заголовками)
         for row_idx in range(2, len(df)):
             try:
+                # ПРОВЕРКА НА ИТОГО - останавливаем парсинг
+                # Проверяем столбец A (category)
+                cell_a = df.iloc[row_idx, 0]
+                if not pd.isna(cell_a):
+                    cell_a_str = str(cell_a).strip().upper()
+                    if cell_a_str == 'ИТОГО' or cell_a_str.startswith('ИТОГО'):
+                        logger.info(f"Found ИТОГО at row {row_idx}, stopping parsing")
+                        break
+                
+                # Проверяем столбец C (имя) - иногда ИТОГО может быть там
+                cell_c = df.iloc[row_idx, 2]
+                if not pd.isna(cell_c):
+                    cell_c_str = str(cell_c).strip().upper()
+                    if cell_c_str == 'ИТОГО' or cell_c_str.startswith('ИТОГО'):
+                        logger.info(f"Found ИТОГО in name column at row {row_idx}, stopping parsing")
+                        break
+                
                 # Столбцы A и B - код
                 category = df.iloc[row_idx, 0]  # A
                 number = df.iloc[row_idx, 1]    # B
