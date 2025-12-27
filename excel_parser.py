@@ -341,7 +341,7 @@ class ExcelProcessor:
                     continue
                 
                 # Проверяем нет ли уже такого кода в списке
-                if any(p['code'] == code for p in payments):
+                if any(p['code'] == code and p['name'] == name for p in payments):
                     print(f"DEBUG: DUPLICATE found! Skipping code={code}, name={name}")
                     continue
                 
