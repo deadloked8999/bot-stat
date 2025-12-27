@@ -921,6 +921,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_text("⏳ Сохраняю данные в базу...")
             
+            # СНАЧАЛА УДАЛЯЕМ ВСЕ СТАРЫЕ ЗАПИСИ ДЛЯ ЭТОЙ ДАТЫ И КЛУБА
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM payments 
+                WHERE club = ? AND date = ?
+            """, (state.payments_upload_club, state.payments_upload_date))
+            conn.commit()
+            conn.close()
+            
+            print(f"DEBUG: Deleted old payments for {state.payments_upload_club} {state.payments_upload_date}")
+            
+            # ПОТОМ ВСТАВЛЯЕМ НОВЫЕ
             saved_count = 0
             for payment in state.payments_upload_data:
                 db.add_payment(
