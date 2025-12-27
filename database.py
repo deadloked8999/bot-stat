@@ -985,6 +985,28 @@ class Database:
         
         return rows
     
+    def debug_payments(self, club: str, date: str):
+        """Показать все записи payments для клуба и даты"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT code, name, total_shift, created_at
+            FROM payments
+            WHERE club = ? AND date = ?
+            ORDER BY code
+        """, (club, date))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        print(f"\n=== PAYMENTS в БД для {club} за {date} ===")
+        for row in rows:
+            print(f"Код: {row[0]}, Имя: {row[1]}, ИТОГО: {row[2]}, Создано: {row[3]}")
+        print(f"=== Всего записей: {len(rows)} ===\n")
+        
+        return rows
+    
     def fix_payment_codes(self):
         """
         Исправить коды в таблице payments (убрать .0 из номеров)

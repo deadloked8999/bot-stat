@@ -943,6 +943,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 saved_count += 1
             
+            # DEBUG: Проверяем что сохранилось
+            db.debug_payments(state.payments_upload_club, state.payments_upload_date)
+            
             await update.message.reply_text(
                 f"✅ СОХРАНЕНО!\n\n"
                 f"🏢 Клуб: {state.payments_upload_club}\n"
