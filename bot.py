@@ -4200,11 +4200,18 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         vychet_10 = round(payment['debt'] * 0.1)  # Округление до целого
         k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
         
+        # Обработка кода для отображения
+        display_code = payment['code']
+        if display_code.startswith('СБ-'):
+            display_code = 'СБ'  # Убираем имя из кода для отображения
+        elif display_code.startswith('Уборщица'):
+            display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
+        
         # Записываем строку
         row_data = [
             date_short,
             payment['club'],
-            payment['code'],
+            display_code,  # Используем обработанный код
             payment['name'],
             payment['stavka'],
             payment['lm_3'],
@@ -4546,11 +4553,18 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         vychet_10 = round(payment['debt'] * 0.1)  # Округление до целого
         k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
         
+        # Обработка кода для отображения
+        display_code = payment['code']
+        if display_code.startswith('СБ-'):
+            display_code = 'СБ'  # Убираем имя из кода для отображения
+        elif display_code.startswith('Уборщица'):
+            display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
+        
         # Записываем строку
         row_data = [
             date_short,
             payment['club'],
-            payment['code'],
+            display_code,  # Используем обработанный код
             payment['name'],
             payment['stavka'],
             payment['lm_3'],

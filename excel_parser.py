@@ -262,13 +262,12 @@ class ExcelProcessor:
                 
                 # 3. НЕТ категории (A пусто)
                 elif not category:
-                    # Берём первое слово из имени
                     name_full = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
                     name_full = str(name_full).strip()
                     
                     if name_full:
-                        first_word = name_full.split()[0]
-                        code = first_word
+                        # Для случая без категории (Уборщица) - используем ПОЛНОЕ имя как код
+                        code = name_full
                     else:
                         # Нет имени - пропускаем
                         continue
@@ -277,9 +276,12 @@ class ExcelProcessor:
                     # Не подходит ни под один вариант - пропускаем
                     continue
                 
-                # Имя из столбца C (уже получали выше, но нужно убедиться что оно есть)
-                name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
-                name = str(name).strip()
+                # Имя всегда берём из столбца C
+                if 'name_full' in locals():
+                    name = name_full
+                else:
+                    name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
+                    name = str(name).strip()
                 
                 # ПРОВЕРКА ОБЪЕДИНЕНИЙ В БД
                 merge_info = db.check_employee_merge(club, code, name)
