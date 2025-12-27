@@ -4299,6 +4299,143 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     
     import os
     os.remove(filename)
+    
+    # === ВТОРОЙ ФАЙЛ: СТИЛИСТЫ (только для одного сотрудника) ===
+    
+    # Получаем расходы на стилистов для этого сотрудника
+    stylist_records = []
+    for club in ['Москвич', 'Анора']:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT period_from, period_to, amount, club
+                FROM stylist_expenses
+                WHERE club = ? AND code = ?
+                  AND NOT (period_to < ? OR period_from > ?)
+                ORDER BY period_from
+            """, (club, code, date_from, date_to))
+            
+            rows = cursor.fetchall()
+            for row in rows:
+                stylist_records.append({
+                    'period_from': row[0],
+                    'period_to': row[1],
+                    'amount': row[2],
+                    'club': row[3]
+                })
+        except Exception as e:
+            print(f"Ошибка получения стилистов: {e}")
+        finally:
+            conn.close()
+    
+    # Если есть данные по стилистам - создаём второй файл
+    if stylist_records:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        
+        wb2 = Workbook()
+        ws2 = wb2.active
+        ws2.title = "Стилисты"
+        
+        # Стили
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=10)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Заголовок
+        ws2['A1'] = f"Расходы на стилистов: {code}"
+        ws2['A1'].font = Font(bold=True, size=14)
+        ws2['A2'] = f"Период: {date_from} .. {date_to}"
+        ws2['A2'].font = Font(size=11)
+        
+        row_num = 4
+        
+        # Шапка таблицы
+        headers = ['Клуб', 'Период с', 'Период по', 'Сумма']
+        for col, header in enumerate(headers, 1):
+            cell = ws2.cell(row=row_num, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
+        row_num += 1
+        
+        # Данные
+        total_stylist = 0
+        for record in stylist_records:
+            # Преобразуем даты
+            try:
+                year, month, day = record['period_from'].split('-')
+                date_from_short = f"{day}.{month}.{year[2:]}"
+            except:
+                date_from_short = record['period_from']
+            
+            try:
+                year, month, day = record['period_to'].split('-')
+                date_to_short = f"{day}.{month}.{year[2:]}"
+            except:
+                date_to_short = record['period_to']
+            
+            row_data = [
+                record['club'],
+                date_from_short,
+                date_to_short,
+                record['amount']
+            ]
+            
+            for col, value in enumerate(row_data, 1):
+                cell = ws2.cell(row=row_num, column=col, value=value)
+                cell.border = border
+                if col == 4:  # Сумма
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            total_stylist += record['amount']
+            row_num += 1
+        
+        # Строка ИТОГО
+        itogo_data = ['ИТОГО', '', '', total_stylist]
+        for col, value in enumerate(itogo_data, 1):
+            cell = ws2.cell(row=row_num, column=col, value=value)
+            cell.font = Font(bold=True)
+            cell.border = border
+            if col == 4:
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Автоподгонка ширины
+        for column in ws2.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                except:
+                    pass
+            ws2.column_dimensions[column_letter].width = min(max_length + 2, 20)
+        
+        # Сохраняем и отправляем
+        filename2 = f"stilisty_{code}_{date_from}_{date_to}.xlsx"
+        wb2.save(filename2)
+        
+        with open(filename2, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                filename=filename2,
+                caption=f"💄 Стилисты: {code}\nПериод: {date_from} .. {date_to}"
+            )
+        
+        import os
+        os.remove(filename2)
 
 
 async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_from: str, date_to: str):
