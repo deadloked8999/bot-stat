@@ -238,29 +238,26 @@ class ExcelProcessor:
         
         # Проходим по строкам (пропускаем первые 2 строки с заголовками)
         for row_idx in range(2, len(df)):
-            try:
-                # ПРОВЕРКА НА ИТОГО И ПРОЧИЕ РАСХОДЫ - останавливаем парсинг
-                # Проверяем ВСЕ первые 5 столбцов на наличие стоп-слов
-                stop_words = ['итого', 'промоутер', 'такси', 'прочие', 'стилист', 'нал:', 'безнал:']
-                
-                should_stop = False
-                for col_idx in range(min(5, df.shape[1])):
-                    cell = df.iloc[row_idx, col_idx]
-                    if not pd.isna(cell):
-                        cell_str = str(cell).strip().lower()
-                        for stop_word in stop_words:
-                            if stop_word in cell_str:
-                                print(f"Found stop word '{stop_word}' at row {row_idx}, col {col_idx}, stopping parsing")
-                                # Используем флаг для выхода из внешнего цикла
-                                should_stop = True
-                                break
+            # ПРОВЕРКА НА ИТОГО И ПРОЧИЕ РАСХОДЫ - останавливаем парсинг ПЕРЕД try-except
+            # Проверяем ВСЕ первые 5 столбцов на наличие стоп-слов
+            should_stop = False
+            for col_idx in range(min(5, df.shape[1])):
+                cell = df.iloc[row_idx, col_idx]
+                if not pd.isna(cell):
+                    cell_str = str(cell).strip().lower()
+                    for stop_word in ['итого', 'промоутер', 'такси', 'прочие', 'стилист', 'нал:', 'безнал:', '%', 'процент']:
+                        if stop_word in cell_str:
+                            print(f"Found stop word '{stop_word}' at row {row_idx}, col {col_idx}, stopping parsing")
+                            should_stop = True
+                            break
                     if should_stop:
                         break
-                
-                if should_stop:
-                    print(f"DEBUG: Breaking at row {row_idx} due to stop word")
-                    break
-                
+            
+            if should_stop:
+                print(f"DEBUG: Breaking at row {row_idx} due to stop word")
+                break  # ← Теперь break гарантированно сработает!
+            
+            try:
                 # Столбцы A и B - код
                 category = df.iloc[row_idx, 0]  # A
                 number = df.iloc[row_idx, 1]    # B
@@ -341,6 +338,11 @@ class ExcelProcessor:
                 
                 # Пропускаем строки где все значения = 0
                 if all(v == 0 for v in [stavka, lm_3, percent_5, promo, crz, cons, tips, total_shift]):
+                    continue
+                
+                # Проверяем нет ли уже такого кода в списке
+                if any(p['code'] == code for p in payments):
+                    print(f"DEBUG: DUPLICATE found! Skipping code={code}, name={name}")
                     continue
                 
                 payments.append({
