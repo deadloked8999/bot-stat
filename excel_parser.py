@@ -239,6 +239,12 @@ class ExcelProcessor:
                 
                 category = str(category).strip()
                 number = str(number).strip()
+                # Убираем .0 если число было прочитано как float
+                if '.' in number:
+                    try:
+                        number = str(int(float(number)))
+                    except:
+                        pass
                 
                 # Пропускаем строки-заголовки (где number не число)
                 if not number.replace('.', '').replace(',', '').isdigit():
