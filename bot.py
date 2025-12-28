@@ -373,6 +373,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     text_lower = normalize_command(text)
     
+    print(f"DEBUG: Получена команда: '{text}', mode={state.mode}, limited_access={state.limited_access}")
+    
     # Проверка авторизации
     if user_id not in AUTHORIZED_USERS:
         if text == PIN_CODE:
@@ -716,6 +718,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '✏️ исправить': 'исправить',
         '🗑️ удалить': 'удалить',
         '📜 журнал': 'журнал',
+        '👔 самозанятые': 'самозанятые',
+        '👥 сотрудники': 'сотрудники',
+        '💄 стилисты': 'стилисты',
         '❓ помощь': 'помощь',
         '🚪 завершить': 'завершить'
     }
@@ -1436,6 +1441,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Команда "стилисты"
     if text_lower in ['стилисты', '💄 стилисты']:
+        print(f"DEBUG: Обработка команды СТИЛИСТЫ")
         keyboard = [
             [InlineKeyboardButton("💄 Загрузить расходы", callback_data='stylist_load')],
             [InlineKeyboardButton("📋 Показать расходы", callback_data='stylist_view')]
