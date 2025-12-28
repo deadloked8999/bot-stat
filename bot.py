@@ -389,7 +389,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Быстрый доступ - авторизуем и сразу в выплаты
             AUTHORIZED_USERS.add(user_id)
             state.limited_access = True  # Ограниченный доступ - только выплаты
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             
             keyboard = [[InlineKeyboardButton("❌ Выход", callback_data="quick_exit")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -4040,7 +4039,6 @@ async def handle_payments_command(update: Update, context: ContextTypes.DEFAULT_
     
     # Если ограниченный доступ - предлагаем повторить
     if state.limited_access:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         keyboard = [[InlineKeyboardButton("❌ Выход", callback_data="quick_exit")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
