@@ -5804,6 +5804,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Подтверждение объединения сотрудников
     elif query.data == 'merge_employees_confirm':
+        print(f"DEBUG: merge_employees_confirm callback triggered")
+        print(f"DEBUG: state.merge_employee_indices={state.merge_employee_indices}")
+        print(f"DEBUG: state.employees_list count={len(state.employees_list) if state.employees_list else 0}")
+        print(f"DEBUG: state.employees_club={state.employees_club}")
+        
         await query.edit_message_reply_markup(None)
         await handle_merge_employees_confirm(query.message, state)
     
@@ -6007,6 +6012,10 @@ async def handle_merge_employees_input(update: Update, state: UserState, text: s
 
 async def handle_merge_employees_confirm(message, state: UserState):
     """Выполнение объединения сотрудников в БД"""
+    print(f"DEBUG: handle_merge_employees_confirm called")
+    print(f"DEBUG: merge_employee_indices={state.merge_employee_indices}")
+    print(f"DEBUG: employees_list={state.employees_list}")
+    
     if not state.merge_employee_indices or not state.employees_list:
         await message.reply_text("❌ Ошибка: данные не найдены")
         state.mode = None
