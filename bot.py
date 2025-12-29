@@ -106,6 +106,11 @@ class UserState:
         self.access_club: Optional[str] = None
         self.employees_access_list: Optional[list] = None
         
+        # Для редактирования сотрудников
+        self.edit_employees_list: Optional[list] = None
+        self.edit_employees_club: Optional[str] = None
+        self.edit_employee_selected: Optional[dict] = None
+        
         # Для режима сотрудника
         self.employee_mode: bool = False
         self.employee_code: Optional[str] = None
@@ -160,6 +165,9 @@ class UserState:
         self.canonical_club = None
         self.access_club = None
         self.employees_access_list = None
+        self.edit_employees_list = None
+        self.edit_employees_club = None
+        self.edit_employee_selected = None
         self.employee_mode = False
         self.employee_code = None
         self.employee_club = None
@@ -254,6 +262,7 @@ def get_employees_menu_keyboard():
     keyboard = [
         [InlineKeyboardButton("🔗 Объединить сотрудников", callback_data='employees_merge')],
         [InlineKeyboardButton("📋 Канонические имена", callback_data='employees_canonical')],
+        [InlineKeyboardButton("✏️ Редактировать сотрудника", callback_data='employees_edit')],
         [InlineKeyboardButton("🔐 Управление доступами", callback_data='employees_access')],
         [InlineKeyboardButton("❌ Назад", callback_data='employees_cancel')]
     ]
@@ -481,7 +490,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
             'awaiting_stylist_period', 'awaiting_stylist_data', 'awaiting_stylist_confirm', 
             'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data', 'awaiting_stylist_clarification',
-            'awaiting_canonical_add', 'awaiting_access_add',
+            'awaiting_canonical_add', 'awaiting_access_add', 'awaiting_employee_edit_select',
+            'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth',
             'нал', 'безнал'
         ]
         
@@ -557,7 +567,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
         'awaiting_stylist_period', 'awaiting_stylist_data',
         'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
-        'awaiting_salary_input', 'awaiting_canonical_add', 'awaiting_access_add'
+        'awaiting_salary_input', 'awaiting_canonical_add', 'awaiting_access_add', 'awaiting_employee_edit_select',
+        'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth'
     ]
     
     if state.limited_access:
@@ -1658,6 +1669,236 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state.mode = None
         state.access_club = None
         state.employees_access_list = None
+        return
+    
+    # === ОБРАБОТКА ВВОДА ПРИ РЕДАКТИРОВАНИИ СОТРУДНИКОВ ===
+    
+    if state.mode == 'awaiting_emp_name':
+        emp = state.edit_employee_selected
+        new_name = text.strip()
+        
+        if not new_name:
+            await update.message.reply_text("❌ Имя не может быть пустым")
+            return
+        
+        # Обновляем в БД
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET full_name = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (new_name, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ ИМЯ ИЗМЕНЕНО\n\n"
+            f"Код: {emp['code']}\n"
+            f"Было: {emp['name']}\n"
+            f"Стало: {new_name}"
+        )
+        
+        state.mode = None
+        state.edit_employee_selected = None
+        return
+    
+    if state.mode == 'awaiting_emp_phone':
+        emp = state.edit_employee_selected
+        
+        if text_lower == 'удалить':
+            new_phone = None
+            action = "удалён"
+        else:
+            new_phone = text.strip()
+            action = "изменён"
+        
+        # Обновляем в БД
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET phone = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (new_phone, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ ТЕЛЕФОН {action.upper()}\n\n"
+            f"Код: {emp['code']}\n"
+            f"Имя: {emp['name']}\n"
+            f"Телефон: {new_phone or 'удалён'}"
+        )
+        
+        state.mode = None
+        state.edit_employee_selected = None
+        return
+    
+    if state.mode == 'awaiting_emp_tg':
+        emp = state.edit_employee_selected
+        
+        if text_lower == 'удалить':
+            new_tg = None
+            action = "удалён (доступ отключён)"
+        else:
+            try:
+                new_tg = int(text.strip())
+                action = "изменён (доступ активен)"
+            except:
+                await update.message.reply_text("❌ Telegram ID должен быть числом")
+                return
+        
+        # Обновляем в БД
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET telegram_user_id = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (new_tg, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ TELEGRAM ID {action.upper()}\n\n"
+            f"Код: {emp['code']}\n"
+            f"Имя: {emp['name']}\n"
+            f"Telegram ID: {new_tg or 'удалён'}"
+        )
+        
+        state.mode = None
+        state.edit_employee_selected = None
+        return
+    
+    if state.mode == 'awaiting_emp_birth':
+        emp = state.edit_employee_selected
+        
+        if text_lower == 'удалить':
+            new_birth = None
+            action = "удалена"
+        else:
+            # Парсим дату
+            try:
+                from datetime import datetime
+                birth_date = datetime.strptime(text.strip(), '%d.%m.%Y')
+                new_birth = birth_date.strftime('%Y-%m-%d')
+                action = "изменена"
+            except:
+                await update.message.reply_text(
+                    "❌ Неверный формат даты\n\n"
+                    "Используйте: ДД.ММ.ГГГГ\n"
+                    "Пример: 15.03.1998"
+                )
+                return
+        
+        # Обновляем в БД
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET birth_date = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (new_birth, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        display_birth = datetime.strptime(new_birth, '%Y-%m-%d').strftime('%d.%m.%Y') if new_birth else 'удалена'
+        
+        await update.message.reply_text(
+            f"✅ ДАТА РОЖДЕНИЯ {action.upper()}\n\n"
+            f"Код: {emp['code']}\n"
+            f"Имя: {emp['name']}\n"
+            f"Дата рождения: {display_birth}"
+        )
+        
+        state.mode = None
+        state.edit_employee_selected = None
+        return
+    
+    # Обработка выбора сотрудника для редактирования
+    if state.mode == 'awaiting_employee_edit_select':
+        if text_lower == 'отмена':
+            await update.message.reply_text("❌ Редактирование отменено")
+            state.mode = None
+            state.edit_employees_list = None
+            state.edit_employees_club = None
+            return
+        
+        # Парсим номер
+        try:
+            emp_index = int(text)
+        except:
+            await update.message.reply_text("❌ Введите номер сотрудника")
+            return
+        
+        # Проверка индекса
+        if emp_index < 1 or emp_index > len(state.edit_employees_list):
+            await update.message.reply_text(
+                f"❌ Неверный номер\n"
+                f"Доступны номера от 1 до {len(state.edit_employees_list)}"
+            )
+            return
+        
+        # Получаем сотрудника
+        employee = state.edit_employees_list[emp_index - 1]
+        state.edit_employee_selected = employee
+        
+        # Формируем карточку
+        status = "✅ Работает" if employee['is_active'] else "🗂️ Уволен"
+        access = "🔐 Есть доступ" if employee['telegram_user_id'] else "❌ Нет доступа"
+        
+        card_text = (
+            f"👤 КАРТОЧКА СОТРУДНИКА\n\n"
+            f"🏢 Клуб: {state.edit_employees_club}\n"
+            f"💼 Код: {employee['code']}\n"
+            f"👤 Имя: {employee['name']}\n"
+            f"📱 Телефон: {employee['phone'] or 'не указан'}\n"
+            f"🆔 Telegram ID: {employee['telegram_user_id'] or 'не указан'}\n"
+            f"📊 Статус: {status}\n"
+            f"🔐 Доступ: {access}\n"
+        )
+        
+        # Кнопки редактирования
+        buttons = []
+        
+        if employee['is_active']:
+            # Для действующих сотрудников
+            buttons.append([InlineKeyboardButton("✏️ Изменить имя", callback_data='emp_edit_name')])
+            buttons.append([InlineKeyboardButton("📱 Изменить телефон", callback_data='emp_edit_phone')])
+            
+            if employee['telegram_user_id']:
+                buttons.append([InlineKeyboardButton("🔐 Изменить TG ID", callback_data='emp_edit_tg')])
+            else:
+                buttons.append([InlineKeyboardButton("➕ Добавить TG ID (дать доступ)", callback_data='emp_edit_tg')])
+            
+            buttons.append([InlineKeyboardButton("🎂 Дата рождения", callback_data='emp_edit_birth')])
+            buttons.append([InlineKeyboardButton("🚫 Уволить", callback_data='emp_fire')])
+        else:
+            # Для уволенных
+            buttons.append([InlineKeyboardButton("👀 Просмотр", callback_data='emp_view')])
+            buttons.append([InlineKeyboardButton("🔄 Вернуть на работу", callback_data='emp_restore')])
+        
+        buttons.append([InlineKeyboardButton("❌ Назад", callback_data='emp_edit_cancel')])
+        
+        await update.message.reply_text(
+            card_text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+        state.mode = None  # Ждём callback от кнопок
         return
     
     # Обработка ввода номеров для объединения сотрудников
@@ -5196,6 +5437,17 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             ])
         )
     
+    elif query.data == 'employees_edit':
+        await query.edit_message_text(
+            "✏️ РЕДАКТИРОВАНИЕ СОТРУДНИКОВ\n\n"
+            "Выберите клуб:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏢 Москвич", callback_data='edit_club_moskvich')],
+                [InlineKeyboardButton("🏢 Анора", callback_data='edit_club_anora')],
+                [InlineKeyboardButton("❌ Назад", callback_data='employees_menu')]
+            ])
+        )
+    
     elif query.data == 'employees_access':
         # Новая логика - управление доступами
         await query.edit_message_text(
@@ -5218,6 +5470,223 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'employees_cancel':
         await query.edit_message_text("👥 Управление сотрудниками отменено")
+    
+    # === РЕДАКТИРОВАНИЕ СОТРУДНИКОВ ===
+    
+    elif query.data == 'emp_edit_name':
+        await query.edit_message_text(
+            f"✏️ ИЗМЕНИТЬ ИМЯ\n\n"
+            f"Текущее имя: {state.edit_employee_selected['name']}\n\n"
+            f"Введите новое имя:"
+        )
+        state.mode = 'awaiting_emp_name'
+    
+    elif query.data == 'emp_edit_phone':
+        await query.edit_message_text(
+            f"📱 ИЗМЕНИТЬ ТЕЛЕФОН\n\n"
+            f"Текущий: {state.edit_employee_selected['phone'] or 'не указан'}\n\n"
+            f"Введите новый телефон (или 'удалить' для удаления):"
+        )
+        state.mode = 'awaiting_emp_phone'
+    
+    elif query.data == 'emp_edit_tg':
+        current_tg = state.edit_employee_selected['telegram_user_id']
+        await query.edit_message_text(
+            f"🔐 ИЗМЕНИТЬ TELEGRAM ID\n\n"
+            f"Текущий: {current_tg or 'не указан'}\n\n"
+            f"Введите новый Telegram User ID (или 'удалить' для удаления):"
+        )
+        state.mode = 'awaiting_emp_tg'
+    
+    elif query.data == 'emp_edit_birth':
+        await query.edit_message_text(
+            f"🎂 ДАТА РОЖДЕНИЯ\n\n"
+            f"Введите дату в формате ДД.ММ.ГГГГ\n"
+            f"Пример: 15.03.1998\n\n"
+            f"Или 'удалить' для удаления:"
+        )
+        state.mode = 'awaiting_emp_birth'
+    
+    elif query.data == 'emp_fire':
+        await query.edit_message_text(
+            f"🚫 УВОЛИТЬ СОТРУДНИКА\n\n"
+            f"Сотрудник: {state.edit_employee_selected['code']} - {state.edit_employee_selected['name']}\n"
+            f"Клуб: {state.edit_employees_club}\n\n"
+            f"⚠️ После увольнения:\n"
+            f"• Статус → Уволен\n"
+            f"• Доступ к боту → Отключён\n"
+            f"• Дата увольнения → Сегодня\n\n"
+            f"Подтвердите увольнение:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ УВОЛИТЬ", callback_data='emp_fire_confirm')],
+                [InlineKeyboardButton("❌ Отмена", callback_data='emp_fire_cancel')]
+            ])
+        )
+    
+    elif query.data == 'emp_fire_confirm':
+        emp = state.edit_employee_selected
+        
+        # Обновляем в БД
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        cursor.execute("""
+            UPDATE employees
+            SET is_active = 0, fired_date = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (today, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await query.edit_message_text(
+            f"✅ СОТРУДНИК УВОЛЕН\n\n"
+            f"Код: {emp['code']}\n"
+            f"Имя: {emp['name']}\n"
+            f"Клуб: {state.edit_employees_club}\n"
+            f"Дата увольнения: {today}\n\n"
+            f"Доступ к боту отключён."
+        )
+        
+        state.edit_employee_selected = None
+    
+    elif query.data == 'emp_fire_cancel':
+        await query.answer("Отменено")
+        # Возвращаемся к карточке
+        await query.message.reply_text("Используйте кнопки меню для продолжения")
+        state.edit_employee_selected = None
+    
+    elif query.data == 'emp_restore':
+        emp = state.edit_employee_selected
+        
+        # Обновляем в БД
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET is_active = 1, fired_date = NULL, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await query.edit_message_text(
+            f"✅ СОТРУДНИК ВОЗВРАЩЁН\n\n"
+            f"Код: {emp['code']}\n"
+            f"Имя: {emp['name']}\n"
+            f"Клуб: {state.edit_employees_club}\n\n"
+            f"Статус: Действующий"
+        )
+        
+        state.edit_employee_selected = None
+    
+    elif query.data == 'emp_view':
+        # Просто показываем информацию (уже показана в карточке)
+        await query.answer("Информация отображена выше")
+    
+    elif query.data == 'emp_edit_cancel':
+        await query.edit_message_text("❌ Редактирование отменено")
+        state.edit_employee_selected = None
+        state.edit_employees_list = None
+        state.edit_employees_club = None
+    
+    elif query.data in ['edit_club_moskvich', 'edit_club_anora']:
+        club = 'Москвич' if query.data == 'edit_club_moskvich' else 'Анора'
+        
+        await query.edit_message_text(f"⏳ Формирую список сотрудников {club}...")
+        
+        # Получаем сотрудников из НОВОЙ таблицы employees
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT code, full_name, telegram_user_id, phone, is_active
+            FROM employees
+            WHERE club = ?
+            ORDER BY is_active DESC, code
+        """, (club,))
+        
+        employees = cursor.fetchall()
+        conn.close()
+        
+        if not employees:
+            await query.message.reply_text(f"❌ Нет сотрудников в клубе {club}")
+            return
+        
+        # Формируем файл
+        lines = [f"СОТРУДНИКИ КЛУБА {club.upper()}\n"]
+        lines.append("=" * 60 + "\n\n")
+        
+        active_employees = []
+        fired_employees = []
+        
+        for code, name, tg_id, phone, is_active in employees:
+            emp_dict = {
+                'code': code,
+                'name': name,
+                'telegram_user_id': tg_id,
+                'phone': phone,
+                'is_active': is_active
+            }
+            
+            if is_active:
+                active_employees.append(emp_dict)
+            else:
+                fired_employees.append(emp_dict)
+        
+        # Действующие
+        lines.append("✅ ДЕЙСТВУЮЩИЕ:\n\n")
+        for i, emp in enumerate(active_employees, 1):
+            access_icon = "🔐" if emp['telegram_user_id'] else "❌"
+            phone_info = f" 📱{emp['phone']}" if emp['phone'] else ""
+            lines.append(f"{i}. {emp['code']} - {emp['name']} {access_icon}{phone_info}\n")
+        
+        # Уволенные
+        if fired_employees:
+            lines.append(f"\n🗂️ УВОЛЕННЫЕ:\n\n")
+            offset = len(active_employees)
+            for i, emp in enumerate(fired_employees, offset + 1):
+                lines.append(f"{i}. {emp['code']} - {emp['name']}\n")
+        
+        lines.append("\n" + "=" * 60 + "\n")
+        lines.append(f"Всего: {len(employees)} | Действующих: {len(active_employees)} | Уволенных: {len(fired_employees)}")
+        
+        # Сохраняем во временный файл
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
+        temp_file.write(''.join(lines))
+        temp_file.close()
+        
+        # Отправляем файл
+        with open(temp_file.name, 'rb') as f:
+            await query.message.reply_document(
+                document=f,
+                filename=f"sotrudniki_{club.lower()}_edit.txt",
+                caption=f"✏️ Список сотрудников клуба {club}\n\n🔐 = есть доступ к боту"
+            )
+        
+        # Инструкция
+        await query.message.reply_text(
+            "✏️ ДЛЯ РЕДАКТИРОВАНИЯ:\n\n"
+            "Отправьте номер сотрудника из списка\n\n"
+            "📝 Пример: 5\n\n"
+            "❌ Для отмены: отмена"
+        )
+        
+        # Сохраняем список в state
+        state.edit_employees_list = active_employees + fired_employees
+        state.edit_employees_club = club
+        state.mode = 'awaiting_employee_edit_select'
+        
+        # Удаляем временный файл
+        import os
+        os.remove(temp_file.name)
     
     # Выбор клуба для канонических имён
     elif query.data in ['canonical_club_moskvich', 'canonical_club_anora']:
