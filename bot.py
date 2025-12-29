@@ -6024,19 +6024,30 @@ async def handle_merge_employees_confirm(message, state: UserState):
         employees_to_merge=selected_employees[1:]  # Все кроме главного
     )
     
-    # Формируем отчёт
-    lines = ["✅ ОБЪЕДИНЕНИЕ ВЫПОЛНЕНО!\n"]
-    lines.append(f"🏢 Клуб: {state.employees_club}\n")
-    lines.append("Объединены:\n")
-    
-    for i, emp in enumerate(selected_employees[1:], 1):
-        lines.append(f"• {emp['code']} - {emp['name']} → {main_employee['code']} - {main_employee['name']}\n")
-    
-    lines.append(f"\n📊 Обновлено записей в БД: {updated_count}")
-    lines.append("\n\n✅ Теперь в отчётах эти сотрудники будут показываться как:")
-    lines.append(f"   {main_employee['code']} - {main_employee['name']}")
-    
-    await message.reply_text(''.join(lines))
+    # Проверяем результат
+    if updated_count == 0:
+        await message.reply_text(
+            "⚠️ ВНИМАНИЕ!\n\n"
+            "Объединение записано, но не найдено записей в таблице operations для переноса.\n\n"
+            "Возможные причины:\n"
+            "• Эти сотрудники ещё не имеют записей в БД\n"
+            "• Коды/имена не совпадают точно\n\n"
+            "Проверьте логи для деталей."
+        )
+    else:
+        # Формируем отчёт об успехе
+        lines = ["✅ ОБЪЕДИНЕНИЕ ВЫПОЛНЕНО!\n"]
+        lines.append(f"🏢 Клуб: {state.employees_club}\n")
+        lines.append("Объединены:\n")
+        
+        for i, emp in enumerate(selected_employees[1:], 1):
+            lines.append(f"• {emp['code']} - {emp['name']} → {main_employee['code']} - {main_employee['name']}\n")
+        
+        lines.append(f"\n📊 Обновлено записей в БД: {updated_count}")
+        lines.append("\n\n✅ Теперь в отчётах эти сотрудники будут показываться как:")
+        lines.append(f"   {main_employee['code']} - {main_employee['name']}")
+        
+        await message.reply_text(''.join(lines))
     
     # Очищаем состояние
     state.mode = None

@@ -841,6 +841,10 @@ class Database:
         Returns:
             Количество обновлённых записей
         """
+        print(f"DEBUG: merge_employees started")
+        print(f"DEBUG: club={club}, main_code={main_code}, main_name={main_name}")
+        print(f"DEBUG: employees_to_merge={employees_to_merge}")
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -849,11 +853,13 @@ class Database:
         
         try:
             for emp in employees_to_merge:
+                print(f"DEBUG: Processing employee: {emp['code']} - {emp['name']}")
                 # Записываем объединение в таблицу employee_merges
                 cursor.execute("""
                     INSERT INTO employee_merges (club, original_code, original_name, merged_code, merged_name, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (club, emp['code'], emp['name'], main_code, main_name, now))
+                print(f"DEBUG: Merge record inserted for {emp['code']} - {emp['name']}")
                 
                 # Получаем все записи сотрудника которого объединяем
                 cursor.execute("""
@@ -863,12 +869,15 @@ class Database:
                 """, (club, emp['code'], emp['name']))
                 
                 records = cursor.fetchall()
+                print(f"DEBUG: Found {len(records)} records to merge for {emp['code']} - {emp['name']}")
                 
                 # Для каждой записи:
                 # 1. Проверяем есть ли уже запись с (club, date, main_code, channel)
                 # 2. Если есть - агрегируем (добавляем amount)
                 # 3. Если нет - создаём новую с main_code
                 for date, channel, amount, original_line in records:
+                    print(f"DEBUG: Merging record: date={date}, channel={channel}, amount={amount}")
+                    
                     # Проверяем существование
                     cursor.execute("""
                         SELECT id, amount FROM operations
@@ -880,6 +889,7 @@ class Database:
                     if existing:
                         # Агрегируем
                         new_amount = existing[1] + amount
+                        print(f"DEBUG: Aggregating with existing record id={existing[0]}, old_amount={existing[1]}, new_amount={new_amount}")
                         cursor.execute("""
                             UPDATE operations
                             SET amount = ?, name_snapshot = ?
@@ -887,6 +897,7 @@ class Database:
                         """, (new_amount, main_name, existing[0]))
                     else:
                         # Создаём новую запись
+                        print(f"DEBUG: Creating new record for main_code={main_code}")
                         cursor.execute("""
                             INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -899,12 +910,16 @@ class Database:
                     DELETE FROM operations
                     WHERE club = ? AND code = ? AND name_snapshot = ?
                 """, (club, emp['code'], emp['name']))
+                print(f"DEBUG: Deleted old records for {emp['code']} - {emp['name']}")
             
             conn.commit()
+            print(f"DEBUG: Commit successful, total_updated={total_updated}")
             conn.close()
             return total_updated
         except Exception as e:
-            print(f"Ошибка объединения сотрудников: {e}")
+            print(f"DEBUG: EXCEPTION in merge_employees: {e}")
+            import traceback
+            traceback.print_exc()
             conn.rollback()
             conn.close()
             return 0
