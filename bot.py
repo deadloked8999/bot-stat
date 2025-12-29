@@ -99,9 +99,6 @@ class UserState:
         self.employees_club: Optional[str] = None
         self.merge_employee_indices: Optional[list] = None
         
-        # Для канонических имён
-        self.canonical_club: Optional[str] = None
-        
         # Для управления доступами
         self.access_club: Optional[str] = None
         self.employees_access_list: Optional[list] = None
@@ -110,6 +107,9 @@ class UserState:
         self.edit_employees_list: Optional[list] = None
         self.edit_employees_club: Optional[str] = None
         self.edit_employee_selected: Optional[dict] = None
+        
+        # Для добавления сотрудника
+        self.add_employee_club: Optional[str] = None
         
         # Для режима сотрудника
         self.employee_mode: bool = False
@@ -162,7 +162,6 @@ class UserState:
         self.delete_mass_date_from = None
         self.delete_mass_date_to = None
         self.delete_mass_preview = None
-        self.canonical_club = None
         self.access_club = None
         self.employees_access_list = None
         self.edit_employees_list = None
@@ -232,7 +231,8 @@ def get_club_choice_keyboard():
 def get_employee_menu_keyboard():
     """Клавиатура для сотрудника (ограниченный доступ)"""
     keyboard = [
-        ['💵 ЗП'],  # Только просмотр своих выплат
+        ['💰 Моя ЗП'],  # Последняя начисленная ЗП
+        ['💵 История выплат'],  # История последних выплат
         ['❌ Выход']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -261,8 +261,8 @@ def get_employees_menu_keyboard():
     """Меню управления сотрудниками"""
     keyboard = [
         [InlineKeyboardButton("🔗 Объединить сотрудников", callback_data='employees_merge')],
-        [InlineKeyboardButton("📋 Канонические имена", callback_data='employees_canonical')],
         [InlineKeyboardButton("✏️ Редактировать сотрудника", callback_data='employees_edit')],
+        [InlineKeyboardButton("➕ Добавить сотрудника", callback_data='employees_add')],
         [InlineKeyboardButton("🔐 Управление доступами", callback_data='employees_access')],
         [InlineKeyboardButton("❌ Назад", callback_data='employees_cancel')]
     ]
@@ -490,8 +490,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
             'awaiting_stylist_period', 'awaiting_stylist_data', 'awaiting_stylist_confirm', 
             'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data', 'awaiting_stylist_clarification',
-            'awaiting_canonical_add', 'awaiting_access_add', 'awaiting_employee_edit_select',
+            'awaiting_access_add', 'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
             'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth',
+            'employee_awaiting_date', 'employee_awaiting_period',
             'нал', 'безнал'
         ]
         
@@ -567,8 +568,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
         'awaiting_stylist_period', 'awaiting_stylist_data',
         'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
-        'awaiting_salary_input', 'awaiting_canonical_add', 'awaiting_access_add', 'awaiting_employee_edit_select',
-        'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth'
+        'awaiting_salary_input', 'awaiting_access_add', 'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
+        'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth',
+        'employee_awaiting_date', 'employee_awaiting_period'
     ]
     
     if state.limited_access:
@@ -765,6 +767,300 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove()
         )
         return
+    
+    # === ОБРАБОТКА КОМАНД СОТРУДНИКА ===
+    if state.employee_mode:
+        # Команда "выход"
+        if text_lower in ['выход', '❌ выход']:
+            state.employee_mode = False
+            state.employee_code = None
+            state.employee_club = None
+            state.employee_name = None
+            state.mode = None
+            await update.message.reply_text(
+                "👋 Сессия завершена\n\n"
+                "Для повторного входа используйте /start",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        
+        # Команда "Моя ЗП" - последняя начисленная ЗП
+        if text_lower in ['моя зп', '💰 моя зп', 'зп', '💵 зп']:
+            # Получаем последнюю запись из payments
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+                       fines, total_shift, debt, debt_nal, to_pay
+                FROM payments
+                WHERE club = ? AND code = ?
+                ORDER BY date DESC
+                LIMIT 1
+            """, (state.employee_club, state.employee_code))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if not row:
+                await update.message.reply_text(
+                    "❌ Данные о ЗП не найдены\n\n"
+                    "Возможно, ЗП ещё не начислена или файл не загружен."
+                )
+                return
+            
+            date, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+            
+            # Пересчитываем К выплате
+            vychet_10 = round(debt * 0.1) if debt else 0
+            k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+            
+            msg = (
+                f"💰 ВАША ПОСЛЕДНЯЯ ЗП\n\n"
+                f"📅 Дата: {date}\n"
+                f"💼 Код: {state.employee_code}\n"
+                f"👤 {state.employee_name}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💵 Ставка: {int(stavka)}\n"
+                f"📊 3% ЛМ: {int(lm_3)}\n"
+                f"📊 5%: {int(percent_5)}\n"
+                f"🎉 Промо: {int(promo)}\n"
+                f"🍽 CRZ: {int(crz)}\n"
+                f"🥂 Cons: {int(cons)}\n"
+                f"💸 Чаевые: {int(tips)}\n"
+            )
+            
+            if fines:
+                msg += f"⚠️ Штрафы: {int(fines)}\n"
+            
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 ИТОГО выплат: {int(total_shift)}\n"
+                f"💵 Получила на смене: {int(to_pay or 0)}\n"
+                f"📋 Долг БН: {int(debt or 0)}\n"
+                f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+            )
+            
+            await update.message.reply_text(msg)
+            return
+        
+        # Команда "История выплат"
+        if text_lower in ['история выплат', '💵 история выплат']:
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT date, total_shift, to_pay
+                FROM payments
+                WHERE club = ? AND code = ?
+                ORDER BY date DESC
+                LIMIT 10
+            """, (state.employee_club, state.employee_code))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if not rows:
+                await update.message.reply_text("❌ История выплат пуста")
+                return
+            
+            msg = f"💵 ИСТОРИЯ ВЫПЛАТ\n\n"
+            msg += f"💼 {state.employee_code} - {state.employee_name}\n\n"
+            
+            for date, total, paid in rows:
+                msg += f"📅 {date}: {int(total)} ₽\n"
+            
+            msg += f"\n📊 Всего записей: {len(rows)}"
+            
+            await update.message.reply_text(msg)
+            return
+        
+        # Обработка ввода даты для ЗП
+        if state.mode == 'employee_awaiting_date':
+            # Парсим дату
+            try:
+                from datetime import datetime
+                # Формат: ДД,ММ или ДД.ММ
+                date_str = text.replace(',', '.').strip()
+                parts = date_str.split('.')
+                
+                if len(parts) != 2:
+                    raise ValueError
+                
+                day = int(parts[0])
+                month = int(parts[1])
+                year = datetime.now().year
+                
+                date_obj = datetime(year, month, day)
+                date_formatted = date_obj.strftime('%Y-%m-%d')
+                
+            except:
+                await update.message.reply_text(
+                    "❌ Неверный формат даты\n\n"
+                    "Используйте: ДД,ММ или ДД.ММ\n"
+                    "Пример: 14,12 или 14.12"
+                )
+                return
+            
+            # Получаем ЗП за эту дату
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+                       fines, total_shift, debt, debt_nal, to_pay
+                FROM payments
+                WHERE club = ? AND code = ? AND date = ?
+            """, (state.employee_club, state.employee_code, date_formatted))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if not row:
+                await update.message.reply_text(
+                    f"❌ ЗП за {date_str} не найдена\n\n"
+                    f"Возможно:\n"
+                    f"• В этот день не было смены\n"
+                    f"• Файл ещё не загружен\n"
+                    f"• Неверная дата"
+                )
+                state.mode = None
+                return
+            
+            date, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+            
+            vychet_10 = round(debt * 0.1) if debt else 0
+            k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+            
+            msg = (
+                f"💰 ЗП ЗА {date_str}\n\n"
+                f"📅 {date}\n"
+                f"💼 {state.employee_code}\n"
+                f"👤 {state.employee_name}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💵 Ставка: {int(stavka)}\n"
+                f"📊 3% ЛМ: {int(lm_3)}\n"
+                f"📊 5%: {int(percent_5)}\n"
+                f"🎉 Промо: {int(promo)}\n"
+                f"🍽 CRZ: {int(crz)}\n"
+                f"🥂 Cons: {int(cons)}\n"
+                f"💸 Чаевые: {int(tips)}\n"
+            )
+            
+            if fines:
+                msg += f"⚠️ Штрафы: {int(fines)}\n"
+            
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 ИТОГО: {int(total_shift)}\n"
+                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+            )
+            
+            await update.message.reply_text(msg)
+            state.mode = None
+            return
+        
+        # Обработка ввода периода для ЗП
+        if state.mode == 'employee_awaiting_period':
+            # Парсим период
+            try:
+                from datetime import datetime
+                # Формат: ДД,ММ-ДД,ММ
+                period = text.replace('.', ',').strip()
+                parts = period.split('-')
+                
+                if len(parts) != 2:
+                    raise ValueError
+                
+                # Дата от
+                date_from_parts = parts[0].split(',')
+                day_from = int(date_from_parts[0])
+                month_from = int(date_from_parts[1])
+                year = datetime.now().year
+                date_from = datetime(year, month_from, day_from).strftime('%Y-%m-%d')
+                
+                # Дата до
+                date_to_parts = parts[1].split(',')
+                day_to = int(date_to_parts[0])
+                month_to = int(date_to_parts[1])
+                date_to = datetime(year, month_to, day_to).strftime('%Y-%m-%d')
+                
+            except:
+                await update.message.reply_text(
+                    "❌ Неверный формат периода\n\n"
+                    "Используйте: ДД,ММ-ДД,ММ\n"
+                    "Пример: 14,12-20,12"
+                )
+                return
+            
+            # Получаем все ЗП за период
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+                       fines, total_shift, debt, debt_nal, to_pay
+                FROM payments
+                WHERE club = ? AND code = ? AND date BETWEEN ? AND ?
+                ORDER BY date
+            """, (state.employee_club, state.employee_code, date_from, date_to))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if not rows:
+                await update.message.reply_text(
+                    f"❌ ЗП за период {parts[0]}-{parts[1]} не найдена"
+                )
+                state.mode = None
+                return
+            
+            # Суммируем
+            total_stavka = sum(r[1] for r in rows)
+            total_lm_3 = sum(r[2] for r in rows)
+            total_percent_5 = sum(r[3] for r in rows)
+            total_promo = sum(r[4] for r in rows)
+            total_crz = sum(r[5] for r in rows)
+            total_cons = sum(r[6] for r in rows)
+            total_tips = sum(r[7] for r in rows)
+            total_fines = sum(r[8] for r in rows)
+            total_shift = sum(r[9] for r in rows)
+            total_debt = sum(r[10] for r in rows)
+            total_debt_nal = sum(r[11] for r in rows)
+            
+            vychet_10 = round(total_debt * 0.1)
+            k_vyplate = round(total_debt_nal + total_debt - vychet_10)
+            
+            msg = (
+                f"💰 ЗП ЗА ПЕРИОД\n\n"
+                f"📅 {parts[0]} - {parts[1]}\n"
+                f"💼 {state.employee_code}\n"
+                f"👤 {state.employee_name}\n"
+                f"📊 Смен: {len(rows)}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💵 Ставка: {int(total_stavka)}\n"
+                f"📊 3% ЛМ: {int(total_lm_3)}\n"
+                f"📊 5%: {int(total_percent_5)}\n"
+                f"🎉 Промо: {int(total_promo)}\n"
+                f"🍽 CRZ: {int(total_crz)}\n"
+                f"🥂 Cons: {int(total_cons)}\n"
+                f"💸 Чаевые: {int(total_tips)}\n"
+            )
+            
+            if total_fines:
+                msg += f"⚠️ Штрафы: {int(total_fines)}\n"
+            
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 ИТОГО: {int(total_shift)}\n"
+                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+            )
+            
+            await update.message.reply_text(msg)
+            state.mode = None
+            return
     
     # Сопоставление кнопок с командами
     button_commands = {
@@ -1531,64 +1827,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_self_employed_remove(update, state, text)
         return
     
-    # Обработка добавления канонического имени
-    if state.mode == 'awaiting_canonical_add':
-        if text_lower == 'отмена':
-            await update.message.reply_text("❌ Добавление отменено")
-            state.mode = None
-            state.canonical_club = None
-            return
-        
-        # Парсим ввод: КОД ИМЯ ДАТА_С [ДАТА_ДО]
-        parts = text.split()
-        
-        if len(parts) < 3:
-            await update.message.reply_text(
-                "❌ Неверный формат\n\n"
-                "Используйте: КОД ИМЯ ДАТА_С [ДАТА_ДО]\n"
-                "Пример: Д1 Юлия 01.01.2024"
-            )
-            return
-        
-        code = DataParser.normalize_code(parts[0])
-        name = parts[1]
-        date_from_str = parts[2]
-        date_to_str = parts[3] if len(parts) > 3 else None
-        
-        # Парсим даты
-        try:
-            from datetime import datetime
-            date_from = datetime.strptime(date_from_str, '%d.%m.%Y').strftime('%Y-%m-%d')
-            date_to = datetime.strptime(date_to_str, '%d.%m.%Y').strftime('%Y-%m-%d') if date_to_str else None
-        except:
-            await update.message.reply_text(
-                "❌ Неверный формат даты\n\n"
-                "Используйте: ДД.ММ.ГГГГ\n"
-                "Пример: 01.01.2024"
-            )
-            return
-        
-        # Добавляем в БД
-        success = db.add_canonical_name(code, state.canonical_club, name, date_from, date_to)
-        
-        if success:
-            status = f"до {date_to_str}" if date_to_str else "активно"
-            await update.message.reply_text(
-                f"✅ Каноническое имя добавлено!\n\n"
-                f"🏢 Клуб: {state.canonical_club}\n"
-                f"Код: {code}\n"
-                f"Имя: {name}\n"
-                f"Период: с {date_from_str} ({status})"
-            )
-        else:
-            await update.message.reply_text(
-                "❌ Ошибка при добавлении канонического имени"
-            )
-        
-        state.mode = None
-        state.canonical_club = None
-        return
-    
     # Обработка добавления доступа
     if state.mode == 'awaiting_access_add':
         if text_lower == 'отмена':
@@ -1828,6 +2066,153 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state.edit_employee_selected = None
         return
     
+    if state.mode == 'awaiting_emp_code':
+        emp = state.edit_employee_selected
+        new_code = DataParser.normalize_code(text.strip())
+        
+        if not new_code:
+            await update.message.reply_text("❌ Код не может быть пустым")
+            return
+        
+        # Проверяем: нет ли уже такого кода
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT code FROM employees
+            WHERE code = ? AND club = ? AND code != ?
+        """, (new_code, state.edit_employees_club, emp['code']))
+        
+        if cursor.fetchone():
+            conn.close()
+            await update.message.reply_text(
+                f"❌ Код {new_code} уже используется другим сотрудником в клубе {state.edit_employees_club}"
+            )
+            return
+        
+        old_code = emp['code']
+        
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        
+        # Обновляем в employees
+        cursor.execute("""
+            UPDATE employees
+            SET code = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (new_code, now, old_code, state.edit_employees_club))
+        
+        # Обновляем в operations
+        cursor.execute("""
+            UPDATE operations
+            SET code = ?
+            WHERE code = ? AND club = ?
+        """, (new_code, old_code, state.edit_employees_club))
+        
+        # Обновляем в payments
+        cursor.execute("""
+            UPDATE payments
+            SET code = ?
+            WHERE code = ? AND club = ?
+        """, (new_code, old_code, state.edit_employees_club))
+        
+        # Обновляем в employee_merges
+        cursor.execute("""
+            UPDATE employee_merges
+            SET merged_code = ?
+            WHERE merged_code = ? AND club = ?
+        """, (new_code, old_code, state.edit_employees_club))
+        
+        cursor.execute("""
+            UPDATE employee_merges
+            SET original_code = ?
+            WHERE original_code = ? AND club = ?
+        """, (new_code, old_code, state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ КОД ИЗМЕНЁН\n\n"
+            f"Было: {old_code}\n"
+            f"Стало: {new_code}\n\n"
+            f"Обновлены все связанные записи в БД"
+        )
+        
+        state.mode = None
+        state.edit_employee_selected = None
+        return
+    
+    if state.mode == 'awaiting_add_employee':
+        parts = text.split(maxsplit=2)
+        
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Неверный формат\n\n"
+                "Минимум: КОД ИМЯ\n"
+                "Пример: Д1 Юлия"
+            )
+            return
+        
+        code = DataParser.normalize_code(parts[0])
+        name = parts[1]
+        
+        # Парсим дату найма
+        if len(parts) > 2:
+            try:
+                from datetime import datetime
+                hired = datetime.strptime(parts[2], '%d.%m.%Y').strftime('%Y-%m-%d')
+            except:
+                await update.message.reply_text(
+                    "❌ Неверный формат даты\n\n"
+                    "Используйте: ДД.ММ.ГГГГ"
+                )
+                return
+        else:
+            from datetime import datetime
+            hired = datetime.now().strftime('%Y-%m-%d')
+        
+        # Проверяем существование
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT code FROM employees
+            WHERE code = ? AND club = ?
+        """, (code, state.add_employee_club))
+        
+        if cursor.fetchone():
+            conn.close()
+            await update.message.reply_text(
+                f"❌ Сотрудник {code} уже существует в клубе {state.add_employee_club}"
+            )
+            return
+        
+        # Добавляем
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        
+        cursor.execute("""
+            INSERT INTO employees 
+            (code, club, full_name, hired_date, is_active, created_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+        """, (code, state.add_employee_club, name, hired, now))
+        
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ СОТРУДНИК ДОБАВЛЕН\n\n"
+            f"🏢 Клуб: {state.add_employee_club}\n"
+            f"Код: {code}\n"
+            f"Имя: {name}\n"
+            f"Дата найма: {hired}"
+        )
+        
+        state.mode = None
+        state.add_employee_club = None
+        return
+    
     # Обработка выбора сотрудника для редактирования
     if state.mode == 'awaiting_employee_edit_select':
         if text_lower == 'отмена':
@@ -1876,6 +2261,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if employee['is_active']:
             # Для действующих сотрудников
+            buttons.append([InlineKeyboardButton("🔢 Изменить код", callback_data='emp_edit_code')])
             buttons.append([InlineKeyboardButton("✏️ Изменить имя", callback_data='emp_edit_name')])
             buttons.append([InlineKeyboardButton("📱 Изменить телефон", callback_data='emp_edit_phone')])
             
@@ -5425,17 +5811,34 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=get_club_employees_keyboard()
         )
     
-    elif query.data == 'employees_canonical':
-        # Новая логика - управление каноническими именами
+    elif query.data == 'employees_add':
         await query.edit_message_text(
-            "📋 КАНОНИЧЕСКИЕ ИМЕНА\n\n"
+            "➕ ДОБАВИТЬ СОТРУДНИКА\n\n"
             "Выберите клуб:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏢 Москвич", callback_data='canonical_club_moskvich')],
-                [InlineKeyboardButton("🏢 Анора", callback_data='canonical_club_anora')],
+                [InlineKeyboardButton("🏢 Москвич", callback_data='add_emp_club_moskvich')],
+                [InlineKeyboardButton("🏢 Анора", callback_data='add_emp_club_anora')],
                 [InlineKeyboardButton("❌ Назад", callback_data='employees_menu')]
             ])
         )
+    
+    elif query.data in ['add_emp_club_moskvich', 'add_emp_club_anora']:
+        club = 'Москвич' if query.data == 'add_emp_club_moskvich' else 'Анора'
+        
+        await query.edit_message_text(
+            f"➕ ДОБАВИТЬ СОТРУДНИКА\n"
+            f"🏢 Клуб: {club}\n\n"
+            f"Введите данные в формате:\n"
+            f"КОД ИМЯ [ДАТА_НАЙМА]\n\n"
+            f"📝 Примеры:\n"
+            f"• Д1 Юлия\n"
+            f"• Д7 Марина 15.03.2024\n"
+            f"• СБ-Иван Петров\n\n"
+            f"Дата найма по умолчанию = сегодня"
+        )
+        
+        state.add_employee_club = club
+        state.mode = 'awaiting_add_employee'
     
     elif query.data == 'employees_edit':
         await query.edit_message_text(
@@ -5472,6 +5875,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("👥 Управление сотрудниками отменено")
     
     # === РЕДАКТИРОВАНИЕ СОТРУДНИКОВ ===
+    
+    elif query.data == 'emp_edit_code':
+        await query.edit_message_text(
+            f"🔢 ИЗМЕНИТЬ КОД\n\n"
+            f"⚠️ ВНИМАНИЕ! Изменение кода затронет:\n"
+            f"• Все записи в таблице operations\n"
+            f"• Все записи в таблице payments\n"
+            f"• Историю объединений\n\n"
+            f"Текущий код: {state.edit_employee_selected['code']}\n\n"
+            f"Введите новый код (например: Д7, СБ-Иван Петров):"
+        )
+        state.mode = 'awaiting_emp_code'
     
     elif query.data == 'emp_edit_name':
         await query.edit_message_text(
@@ -5687,65 +6102,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         # Удаляем временный файл
         import os
         os.remove(temp_file.name)
-    
-    # Выбор клуба для канонических имён
-    elif query.data in ['canonical_club_moskvich', 'canonical_club_anora']:
-        club = 'Москвич' if query.data == 'canonical_club_moskvich' else 'Анора'
-        
-        # Получаем список канонических имён
-        canonical_list = db.get_all_canonical_names(club)
-        
-        if not canonical_list:
-            await query.edit_message_text(
-                f"📋 КАНОНИЧЕСКИЕ ИМЕНА: {club}\n\n"
-                f"❌ Список пуст\n\n"
-                f"Канонические имена устанавливаются автоматически при первом парсинге файла или можно добавить вручную.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Добавить", callback_data=f'canonical_add_{club.lower()}')],
-                    [InlineKeyboardButton("❌ Назад", callback_data='employees_canonical')]
-                ])
-            )
-            return
-        
-        # Формируем список
-        lines = [f"📋 КАНОНИЧЕСКИЕ ИМЕНА: {club}\n"]
-        lines.append("=" * 40 + "\n\n")
-        
-        for item in canonical_list:
-            status = "✅ Активен" if not item['valid_to'] else f"❌ До {item['valid_to']}"
-            lines.append(f"• {item['code']} → {item['canonical_name']}\n")
-            lines.append(f"  С {item['valid_from']} | {status}\n\n")
-        
-        await query.edit_message_text(
-            ''.join(lines),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Добавить", callback_data=f'canonical_add_{club.lower()}')],
-                [InlineKeyboardButton("❌ Назад", callback_data='employees_canonical')]
-            ])
-        )
-        
-        # Сохраняем клуб в state для дальнейших действий
-        state.canonical_club = club
-    
-    # Добавление канонического имени
-    elif query.data.startswith('canonical_add_'):
-        club_lower = query.data.replace('canonical_add_', '')
-        club = 'Москвич' if club_lower == 'москвич' else 'Анора'
-        
-        await query.edit_message_text(
-            f"➕ ДОБАВИТЬ КАНОНИЧЕСКОЕ ИМЯ\n"
-            f"🏢 Клуб: {club}\n\n"
-            f"Введите данные в формате:\n"
-            f"КОД ИМЯ ДАТА_С [ДАТА_ДО]\n\n"
-            f"📝 Примеры:\n"
-            f"• Д1 Юлия 01.01.2024\n"
-            f"• Д7 Марго 15.03.2024 15.08.2024\n"
-            f"• Оф5 Анна 10.05.2024\n\n"
-            f"❌ Для отмены напишите: отмена"
-        )
-        
-        state.mode = 'awaiting_canonical_add'
-        state.canonical_club = club
     
     # Выбор клуба для управления доступами
     elif query.data in ['access_club_moskvich', 'access_club_anora']:
