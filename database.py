@@ -14,6 +14,9 @@ class Database:
     def __init__(self, db_path: str = config.DATABASE_PATH):
         self.db_path = db_path
         self.init_database()
+        
+        # Проверяем и создаём таблицу employees если нужно
+        self.migrate_to_employees()
     
     def get_connection(self):
         """Получить соединение с БД"""
@@ -163,26 +166,6 @@ class Database:
             )
         """)
         
-        # Таблица сотрудников
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS employees (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL,
-                club TEXT NOT NULL,
-                full_name TEXT NOT NULL,
-                phone TEXT,
-                telegram_user_id INTEGER,
-                telegram_username TEXT,
-                birth_date TEXT,
-                hired_date TEXT,
-                fired_date TEXT,
-                is_active INTEGER DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT,
-                UNIQUE(code, club)
-            )
-        """)
-        
         # Добавляем админов если их ещё нет
         cursor.execute("SELECT COUNT(*) FROM admins")
         admin_count = cursor.fetchone()[0]
@@ -227,29 +210,79 @@ class Database:
             ON employee_access(telegram_user_id)
         """)
         
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_employees_code 
-            ON employees(code, club)
-        """)
-        
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_employees_telegram 
-            ON employees(telegram_user_id)
-        """)
-        
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_employees_active 
-            ON employees(is_active)
-        """)
-        
         conn.commit()
         conn.close()
+    
+    def ensure_employees_table(self):
+        """Убедиться что таблица employees существует (для миграции)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
         
-        # Миграция данных в employees
-        self.migrate_to_employees()
+        try:
+            # Проверяем существование таблицы
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='employees'
+            """)
+            
+            if cursor.fetchone():
+                print("[INFO] Table employees already exists")
+                conn.close()
+                return
+            
+            print("[INFO] Creating table employees...")
+            
+            # Создаём таблицу
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS employees (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL,
+                    club TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    phone TEXT,
+                    telegram_user_id INTEGER,
+                    telegram_username TEXT,
+                    birth_date TEXT,
+                    hired_date TEXT,
+                    fired_date TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    UNIQUE(code, club)
+                )
+            """)
+            
+            # Создаём индексы
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_employees_code 
+                ON employees(code, club)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_employees_telegram 
+                ON employees(telegram_user_id)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_employees_active 
+                ON employees(is_active)
+            """)
+            
+            conn.commit()
+            print("[INFO] Table employees created successfully")
+            conn.close()
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to create employees table: {e}")
+            conn.rollback()
+            conn.close()
     
     def migrate_to_employees(self):
         """Миграция данных из operations, payments и employee_access в employees"""
+        
+        # Убеждаемся что таблица существует
+        self.ensure_employees_table()
+        
         print("[MIGRATION] Starting employees migration...")
         
         conn = self.get_connection()
