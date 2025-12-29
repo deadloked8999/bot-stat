@@ -41,12 +41,6 @@ from utils import (
 # Состояния пользователя
 USER_STATES = {}
 
-# Авторизованные пользователи (в памяти - сбрасывается при перезапуске!)
-AUTHORIZED_USERS = set()
-
-# Пин-код для доступа
-PIN_CODE = "1664"
-
 # Пин-код для удаления всех данных
 RESET_PIN_CODE = "6002147"
 
@@ -112,6 +106,12 @@ class UserState:
         self.access_club: Optional[str] = None
         self.employees_access_list: Optional[list] = None
         
+        # Для режима сотрудника
+        self.employee_mode: bool = False
+        self.employee_code: Optional[str] = None
+        self.employee_club: Optional[str] = None
+        self.employee_name: Optional[str] = None
+        
         # Для предпросмотра данных
         self.preview_date: Optional[str] = None
         self.preview_duplicates: Optional[list] = None
@@ -160,6 +160,10 @@ class UserState:
         self.canonical_club = None
         self.access_club = None
         self.employees_access_list = None
+        self.employee_mode = False
+        self.employee_code = None
+        self.employee_club = None
+        self.employee_name = None
     
     def has_data(self) -> bool:
         """Проверка наличия данных"""
@@ -213,6 +217,15 @@ def get_club_choice_keyboard():
     keyboard = [
         ['🏢 СТАРТ МОСКВИЧ'],
         ['🏢 СТАРТ АНОРА']
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def get_employee_menu_keyboard():
+    """Клавиатура для сотрудника (ограниченный доступ)"""
+    keyboard = [
+        ['💵 ЗП'],  # Только просмотр своих выплат
+        ['❌ Выход']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -313,16 +326,29 @@ db = Database()
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка команды /start и старт"""
     user_id = update.effective_user.id
-    
-    # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
-        await update.message.reply_text(
-            "🔒 Введите пин-код для доступа:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-    
     state = get_user_state(user_id)
+    
+    # Проверка: админ или сотрудник?
+    if not db.is_admin(user_id):
+        employee = db.get_employee_by_telegram_id(user_id)
+        if employee and employee['is_active']:
+            # Сотрудник - показываем персональное меню
+            state.employee_mode = True
+            state.employee_code = employee['code']
+            state.employee_club = employee['club']
+            state.employee_name = employee['full_name'] or employee['code']
+            
+            await update.message.reply_text(
+                f"👋 Привет, {state.employee_name}!\n\n"
+                f"🏢 Клуб: {state.employee_club}\n"
+                f"💼 Код: {state.employee_code}\n\n"
+                f"Используйте кнопки меню:",
+                reply_markup=get_employee_menu_keyboard()
+            )
+            return
+        else:
+            # Не админ и не сотрудник - игнорируем
+            return
     
     # Блокируем /start для ограниченного доступа
     if state.limited_access:
@@ -397,19 +423,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"DEBUG: Получена команда: '{text}', mode={state.mode}, limited_access={state.limited_access}")
     
     # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
-        if text == PIN_CODE:
-            AUTHORIZED_USERS.add(user_id)
-            await update.message.reply_text(
-                "✅ Доступ разрешён!\n\n"
-                "Выберите клуб, нажав на кнопку ниже:",
-                reply_markup=get_club_choice_keyboard()
-            )
-            return
-        elif text == "0001":
-            # Быстрый доступ - авторизуем и сразу в выплаты
-            AUTHORIZED_USERS.add(user_id)
-            state.limited_access = True  # Ограниченный доступ - только выплаты
+    if not db.is_admin(user_id) and not state.employee_mode:
+        # Специальный код для limited_access
+        if text == "0001":
+            state.limited_access = True
             
             keyboard = [[InlineKeyboardButton("❌ Выход", callback_data="quick_exit")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -427,6 +444,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             state.mode = 'awaiting_payments_input'
             return
+        else:
+            # Проверяем: может это сотрудник?
+            employee = db.get_employee_by_telegram_id(user_id)
+            if employee and employee['is_active']:
+                state.employee_mode = True
+                state.employee_code = employee['code']
+                state.employee_club = employee['club']
+                state.employee_name = employee['full_name'] or employee['code']
+                
+                await update.message.reply_text(
+                    f"👋 Привет, {state.employee_name}!\n\n"
+                    f"🏢 Клуб: {state.employee_club}\n"
+                    f"💼 Код: {state.employee_code}\n\n"
+                    f"Используйте кнопки меню:",
+                    reply_markup=get_employee_menu_keyboard()
+                )
+                return
+            else:
+                # Не админ, не сотрудник, не спец код - игнорируем
+                return
         else:
             await update.message.reply_text("🔒 Введите пин-код для доступа:")
             return
@@ -455,7 +492,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Если ограниченный доступ - выходим полностью
             if state.limited_access:
                 state.__init__()
-                AUTHORIZED_USERS.discard(user_id)
+                state.limited_access = False
                 await update.message.reply_text(
                     "❌ Сессия завершена\n\n"
                     "Для начала работы введите /start"
@@ -707,10 +744,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass  # Игнорируем ошибки (сообщение уже удалено или старое)
         
         # Очищаем состояние
-        AUTHORIZED_USERS.discard(user_id)
         state.reset_input()
         state.club = None
         state.bot_messages = []
+        state.employee_mode = False
+        state.limited_access = False
         
         await update.message.reply_text(
             "👋 Сессия завершена.\n"
@@ -5025,25 +5063,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     
     user_id = update.effective_user.id
+    state = get_user_state(user_id)
     
     # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
-        await query.answer("🔒 Требуется авторизация", show_alert=True)
-        await query.message.reply_text(
-            "🔒 Введите пин-код для доступа:",
-            reply_markup=ReplyKeyboardRemove()
-        )
+    if not db.is_admin(user_id) and not state.employee_mode and not state.limited_access:
+        await query.answer("🔒 Доступ запрещён", show_alert=True)
         return
     
     await query.answer()
-    state = get_user_state(user_id)
     
     # Кнопка "Выход" из быстрого доступа
     if query.data == 'quick_exit':
         # Полная очистка состояния - сбрасываем все поля
         state.__init__()
-        # Удаляем из авторизованных пользователей
-        AUTHORIZED_USERS.discard(user_id)
+        state.limited_access = False
         await query.edit_message_text(
             "❌ Сессия завершена\n\n"
             "Для начала работы введите /start"
@@ -6616,9 +6649,9 @@ async def restore_sb_names_command(update: Update, context: ContextTypes.DEFAULT
     """Команда для восстановления имен СБ из журнала"""
     user_id = update.effective_user.id
     
-    # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
-        await update.message.reply_text("🔒 Требуется авторизация")
+    # Проверка авторизации (только админы)
+    if not db.is_admin(user_id):
+        await update.message.reply_text("🔒 Доступ запрещён. Только для админов.")
         return
     
     try:
@@ -7104,9 +7137,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     state = get_user_state(user_id)
     
-    # Проверка авторизации
-    if user_id not in AUTHORIZED_USERS:
-        await update.message.reply_text("🔒 Требуется авторизация")
+    # Проверка авторизации (только админы)
+    if not db.is_admin(user_id):
+        await update.message.reply_text("🔒 Доступ запрещён. Только для админов.")
         return
     
     # Проверяем режим загрузки (обычный файл или ЗП)
