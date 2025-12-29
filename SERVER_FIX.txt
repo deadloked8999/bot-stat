@@ -1,0 +1,14 @@
+Выполните эти команды на сервере по одной:
+
+git config pull.rebase false
+
+git config user.name "deadloked8999"
+
+git config user.email "denisov.igor1989@icloud.com"
+
+git fetch origin
+
+git pull origin main
+
+systemctl restart telegram-bot
+

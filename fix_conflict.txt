@@ -1,0 +1,6 @@
+Выполните эти команды на сервере по очереди:
+
+git reset --hard origin/main
+
+systemctl restart telegram-bot
+

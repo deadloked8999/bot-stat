@@ -1,0 +1,8 @@
+Выполните эти команды на сервере по очереди:
+
+cd ~/bot-stat
+git config pull.rebase false
+git fetch origin
+git pull origin main
+systemctl restart telegram-bot
+

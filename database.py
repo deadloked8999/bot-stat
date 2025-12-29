@@ -122,6 +122,65 @@ class Database:
             )
         """)
         
+        # Таблица канонических имён сотрудников
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS employee_canonical_names (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                canonical_name TEXT NOT NULL,
+                club TEXT NOT NULL,
+                valid_from TEXT NOT NULL,
+                valid_to TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(code, club, valid_from)
+            )
+        """)
+        
+        # Таблица доступов сотрудников к боту
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS employee_access (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                club TEXT NOT NULL,
+                telegram_user_id INTEGER UNIQUE NOT NULL,
+                full_name TEXT,
+                username TEXT,
+                phone TEXT,
+                birth_date TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                UNIQUE(code, club)
+            )
+        """)
+        
+        # Таблица админов
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS admins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_user_id INTEGER UNIQUE NOT NULL,
+                name TEXT,
+                added_at TEXT NOT NULL
+            )
+        """)
+        
+        # Добавляем админов если их ещё нет
+        cursor.execute("SELECT COUNT(*) FROM admins")
+        admin_count = cursor.fetchone()[0]
+        
+        if admin_count == 0:
+            # Добавляем двух основных админов
+            admins_to_add = [
+                (1380211249, "Админ 1"),
+                (7942920768, "Админ 2")
+            ]
+            
+            for admin_id, admin_name in admins_to_add:
+                cursor.execute("""
+                    INSERT INTO admins (telegram_user_id, name, added_at)
+                    VALUES (?, ?, ?)
+                """, (admin_id, admin_name, datetime.now().isoformat()))
+                print(f"[INIT] Добавлен админ: {admin_name} ({admin_id})")
+        
         # Индексы для быстрого поиска
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_operations_club_date 
@@ -136,6 +195,16 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_payments_club_date 
             ON payments(club, date)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_canonical_names_lookup 
+            ON employee_canonical_names(code, club, valid_from, valid_to)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employee_access_telegram 
+            ON employee_access(telegram_user_id)
         """)
         
         conn.commit()
@@ -1187,6 +1256,422 @@ class Database:
             return [row[0] for row in rows if row[0]]
         except Exception as e:
             print(f"Ошибка получения имен сотрудника: {e}")
+            conn.close()
+            return []
+    
+    # ============ Методы для работы с каноническими именами ============
+    
+    def get_canonical_name(self, code: str, club: str, date: str) -> Optional[str]:
+        """
+        Получить каноническое имя сотрудника на указанную дату
+        
+        Args:
+            code: Код сотрудника
+            club: Клуб
+            date: Дата в формате YYYY-MM-DD
+        
+        Returns:
+            Каноническое имя или None если не найдено
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT canonical_name
+                FROM employee_canonical_names
+                WHERE code = ? AND club = ? 
+                  AND valid_from <= ? 
+                  AND (valid_to IS NULL OR valid_to >= ?)
+                ORDER BY valid_from DESC
+                LIMIT 1
+            """, (code, club, date, date))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            return row[0] if row else None
+        except Exception as e:
+            print(f"Ошибка получения канонического имени: {e}")
+            conn.close()
+            return None
+    
+    def add_canonical_name(self, code: str, club: str, canonical_name: str, 
+                          valid_from: str, valid_to: Optional[str] = None) -> bool:
+        """
+        Добавить каноническое имя сотрудника
+        
+        Args:
+            code: Код сотрудника
+            club: Клуб
+            canonical_name: Каноническое имя
+            valid_from: Дата начала действия (YYYY-MM-DD)
+            valid_to: Дата окончания действия (YYYY-MM-DD) или None
+        
+        Returns:
+            True если успешно добавлено
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO employee_canonical_names 
+                (code, club, canonical_name, valid_from, valid_to, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (code, club, canonical_name, valid_from, valid_to, 
+                  datetime.now().isoformat()))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка добавления канонического имени: {e}")
+            conn.rollback()
+            conn.close()
+            return False
+    
+    def update_canonical_name_period(self, id: int, valid_to: str) -> bool:
+        """
+        Закрыть период действия канонического имени (увольнение)
+        
+        Args:
+            id: ID записи
+            valid_to: Дата окончания действия (YYYY-MM-DD)
+        
+        Returns:
+            True если успешно обновлено
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                UPDATE employee_canonical_names
+                SET valid_to = ?
+                WHERE id = ?
+            """, (valid_to, id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка обновления периода: {e}")
+            conn.rollback()
+            conn.close()
+            return False
+    
+    def get_all_canonical_names(self, club: str) -> List[Dict]:
+        """
+        Получить все канонические имена для клуба
+        
+        Args:
+            club: Клуб
+        
+        Returns:
+            Список словарей с полями: id, code, canonical_name, valid_from, valid_to, created_at
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT id, code, canonical_name, valid_from, valid_to, created_at
+                FROM employee_canonical_names
+                WHERE club = ?
+                ORDER BY code, valid_from DESC
+            """, (club,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'id': row[0],
+                    'code': row[1],
+                    'canonical_name': row[2],
+                    'valid_from': row[3],
+                    'valid_to': row[4],
+                    'created_at': row[5]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения канонических имён: {e}")
+            conn.close()
+            return []
+    
+    # ============ Методы для работы с доступами сотрудников ============
+    
+    def get_employee_by_telegram_id(self, telegram_user_id: int) -> Optional[Dict]:
+        """
+        Получить данные сотрудника по Telegram ID
+        
+        Args:
+            telegram_user_id: ID пользователя в Telegram
+        
+        Returns:
+            Словарь с данными или None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT id, code, club, telegram_user_id, full_name, username, 
+                       phone, birth_date, is_active, created_at
+                FROM employee_access
+                WHERE telegram_user_id = ? AND is_active = 1
+            """, (telegram_user_id,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return {
+                    'id': row[0],
+                    'code': row[1],
+                    'club': row[2],
+                    'telegram_user_id': row[3],
+                    'full_name': row[4],
+                    'username': row[5],
+                    'phone': row[6],
+                    'birth_date': row[7],
+                    'is_active': bool(row[8]),
+                    'created_at': row[9]
+                }
+            return None
+        except Exception as e:
+            print(f"Ошибка получения сотрудника по Telegram ID: {e}")
+            conn.close()
+            return None
+    
+    def add_employee_access(self, code: str, club: str, telegram_user_id: int,
+                           full_name: Optional[str] = None, username: Optional[str] = None,
+                           phone: Optional[str] = None, birth_date: Optional[str] = None) -> bool:
+        """
+        Добавить доступ сотрудника к боту
+        
+        Args:
+            code: Код сотрудника
+            club: Клуб
+            telegram_user_id: ID пользователя в Telegram
+            full_name: Полное имя
+            username: Username в Telegram
+            phone: Телефон
+            birth_date: Дата рождения (YYYY-MM-DD)
+        
+        Returns:
+            True если успешно добавлено
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO employee_access 
+                (code, club, telegram_user_id, full_name, username, phone, birth_date, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (code, club, telegram_user_id, full_name, username, phone, birth_date,
+                  datetime.now().isoformat()))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка добавления доступа: {e}")
+            conn.rollback()
+            conn.close()
+            return False
+    
+    def update_employee_access(self, id: int, **kwargs) -> bool:
+        """
+        Обновить данные доступа сотрудника
+        
+        Args:
+            id: ID записи
+            **kwargs: Поля для обновления (code, club, full_name, username, phone, birth_date, is_active)
+        
+        Returns:
+            True если успешно обновлено
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Формируем SET часть запроса
+            allowed_fields = ['code', 'club', 'full_name', 'username', 'phone', 'birth_date', 'is_active']
+            updates = []
+            values = []
+            
+            for field, value in kwargs.items():
+                if field in allowed_fields:
+                    updates.append(f"{field} = ?")
+                    values.append(value)
+            
+            if not updates:
+                conn.close()
+                return False
+            
+            values.append(id)
+            query = f"UPDATE employee_access SET {', '.join(updates)} WHERE id = ?"
+            
+            cursor.execute(query, tuple(values))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка обновления доступа: {e}")
+            conn.rollback()
+            conn.close()
+            return False
+    
+    def delete_employee_access(self, id: int) -> bool:
+        """
+        Удалить доступ сотрудника (или деактивировать)
+        
+        Args:
+            id: ID записи
+        
+        Returns:
+            True если успешно удалено/деактивировано
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Деактивируем вместо удаления
+            cursor.execute("""
+                UPDATE employee_access
+                SET is_active = 0
+                WHERE id = ?
+            """, (id,))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка удаления доступа: {e}")
+            conn.rollback()
+            conn.close()
+            return False
+    
+    def get_all_employee_access(self, club: Optional[str] = None) -> List[Dict]:
+        """
+        Получить список всех доступов сотрудников
+        
+        Args:
+            club: Клуб (опционально, если None - все клубы)
+        
+        Returns:
+            Список словарей с данными доступа
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            if club:
+                cursor.execute("""
+                    SELECT id, code, club, telegram_user_id, full_name, username, 
+                           phone, birth_date, is_active, created_at
+                    FROM employee_access
+                    WHERE club = ?
+                    ORDER BY code, created_at DESC
+                """, (club,))
+            else:
+                cursor.execute("""
+                    SELECT id, code, club, telegram_user_id, full_name, username, 
+                           phone, birth_date, is_active, created_at
+                    FROM employee_access
+                    ORDER BY club, code, created_at DESC
+                """)
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'id': row[0],
+                    'code': row[1],
+                    'club': row[2],
+                    'telegram_user_id': row[3],
+                    'full_name': row[4],
+                    'username': row[5],
+                    'phone': row[6],
+                    'birth_date': row[7],
+                    'is_active': bool(row[8]),
+                    'created_at': row[9]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения списка доступов: {e}")
+            conn.close()
+            return []
+    
+    def is_admin(self, telegram_user_id: int) -> bool:
+        """Проверить является ли пользователь админом"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT id FROM admins 
+                WHERE telegram_user_id = ?
+            """, (telegram_user_id,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            return result is not None
+        except Exception as e:
+            print(f"Ошибка проверки админа: {e}")
+            conn.close()
+            return False
+    
+    def add_admin(self, telegram_user_id: int, name: str = None) -> bool:
+        """Добавить админа"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO admins (telegram_user_id, name, added_at)
+                VALUES (?, ?, ?)
+            """, (telegram_user_id, name, datetime.now().isoformat()))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка добавления админа: {e}")
+            conn.close()
+            return False
+    
+    def get_all_admins(self) -> List[Dict]:
+        """Получить список всех админов"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT telegram_user_id, name, added_at 
+                FROM admins
+                ORDER BY added_at
+            """)
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'telegram_user_id': row[0],
+                    'name': row[1],
+                    'added_at': row[2]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения админов: {e}")
             conn.close()
             return []
 

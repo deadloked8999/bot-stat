@@ -167,7 +167,7 @@ class ExcelProcessor:
             'extra': extra_notes
         }
     
-    def extract_payments_sheet(self, file_content: bytes, db, club: str) -> List[Dict[str, Any]]:
+    def extract_payments_sheet(self, file_content: bytes, db, club: str, date: str) -> List[Dict[str, Any]]:
         """
         Извлечение данных из листа 'ЛИСТ ВЫПЛАТ'
         
@@ -309,15 +309,28 @@ class ExcelProcessor:
                 name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
                 name = str(name).strip()
                 
-                # ПРОВЕРКА ОБЪЕДИНЕНИЙ В БД
-                merge_info = db.check_employee_merge(club, code, name)
-                if merge_info:
-                    code = merge_info['merged_code']
-                    name = merge_info['merged_name']
+                # ПРОВЕРКА ИМЕНИ С ПРИОРИТЕТОМ:
+                # 1. Каноническое имя (по дате)
+                # 2. Объединённое имя (employee_merges)
+                # 3. Имя из файла
+                
+                canonical = db.get_canonical_name(code, club, date)
+                if canonical:
+                    # Приоритет 1: Каноническое имя
+                    name = canonical
+                    print(f"DEBUG: Canonical name used for {code}: {name}")
                 else:
-                    existing_names = db.get_employee_names_by_code(club, code)
-                    if existing_names:
-                        name = existing_names[0]
+                    # Приоритет 2: Объединения
+                    merge_info = db.check_employee_merge(club, code, name)
+                    if merge_info:
+                        code = merge_info['merged_code']
+                        name = merge_info['merged_name']
+                        print(f"DEBUG: Merged name used for {code}: {name}")
+                    else:
+                        # Приоритет 3: Существующее имя в БД
+                        existing_names = db.get_employee_names_by_code(club, code)
+                        if existing_names:
+                            name = existing_names[0]
                 
                 # Извлекаем числовые данные
                 stavka = self._parse_decimal(df.iloc[row_idx, 3])       # D
