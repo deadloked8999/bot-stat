@@ -819,7 +819,7 @@ class Database:
             """, (club,))
             
             rows = cursor.fetchall()
-            employees = [{'code': self.normalize_sb_code(row[0]), 'name': row[1]} for row in rows]
+            employees = [{'code': row[0], 'name': row[1]} for row in rows]
             
             conn.close()
             return employees
