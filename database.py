@@ -163,6 +163,26 @@ class Database:
             )
         """)
         
+        # Таблица сотрудников
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                club TEXT NOT NULL,
+                full_name TEXT NOT NULL,
+                phone TEXT,
+                telegram_user_id INTEGER,
+                telegram_username TEXT,
+                birth_date TEXT,
+                hired_date TEXT,
+                fired_date TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                UNIQUE(code, club)
+            )
+        """)
+        
         # Добавляем админов если их ещё нет
         cursor.execute("SELECT COUNT(*) FROM admins")
         admin_count = cursor.fetchone()[0]
@@ -207,8 +227,154 @@ class Database:
             ON employee_access(telegram_user_id)
         """)
         
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employees_code 
+            ON employees(code, club)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employees_telegram 
+            ON employees(telegram_user_id)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employees_active 
+            ON employees(is_active)
+        """)
+        
         conn.commit()
         conn.close()
+        
+        # Миграция данных в employees
+        self.migrate_to_employees()
+    
+    def migrate_to_employees(self):
+        """Миграция данных из operations, payments и employee_access в employees"""
+        print("[MIGRATION] Starting employees migration...")
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Проверяем: уже мигрировали?
+            cursor.execute("SELECT COUNT(*) FROM employees")
+            count = cursor.fetchone()[0]
+            
+            if count > 0:
+                print(f"[MIGRATION] Employees already migrated ({count} records)")
+                conn.close()
+                return
+            
+            # Собираем уникальные коды из operations
+            cursor.execute("""
+                SELECT DISTINCT code, name_snapshot, club, MIN(date) as first_date
+                FROM operations
+                GROUP BY code, club
+            """)
+            operations_data = cursor.fetchall()
+            
+            # Собираем уникальные коды из payments
+            cursor.execute("""
+                SELECT DISTINCT code, name, club, MIN(date) as first_date
+                FROM payments
+                GROUP BY code, club
+            """)
+            payments_data = cursor.fetchall()
+            
+            # Собираем данные из employee_access
+            cursor.execute("""
+                SELECT code, club, telegram_user_id, full_name, username, phone
+                FROM employee_access
+                WHERE is_active = 1
+            """)
+            access_data = cursor.fetchall()
+            
+            # Создаём словарь для быстрого поиска
+            access_dict = {}
+            for row in access_data:
+                key = f"{row[0]}_{row[1]}"  # code_club
+                access_dict[key] = {
+                    'telegram_user_id': row[2],
+                    'full_name': row[3],
+                    'username': row[4],
+                    'phone': row[5]
+                }
+            
+            # Объединяем данные
+            employees_dict = {}
+            
+            # Из operations
+            for code, name, club, first_date in operations_data:
+                key = f"{code}_{club}"
+                if key not in employees_dict:
+                    employees_dict[key] = {
+                        'code': code,
+                        'club': club,
+                        'full_name': name,
+                        'hired_date': first_date
+                    }
+            
+            # Из payments (если имя длиннее - используем его)
+            for code, name, club, first_date in payments_data:
+                key = f"{code}_{club}"
+                if key in employees_dict:
+                    # Обновляем имя если оно длиннее
+                    if name and len(name) > len(employees_dict[key]['full_name']):
+                        employees_dict[key]['full_name'] = name
+                    # Обновляем дату если раньше
+                    if first_date < employees_dict[key]['hired_date']:
+                        employees_dict[key]['hired_date'] = first_date
+                else:
+                    employees_dict[key] = {
+                        'code': code,
+                        'club': club,
+                        'full_name': name,
+                        'hired_date': first_date
+                    }
+            
+            # Добавляем данные из employee_access
+            for key, emp in employees_dict.items():
+                if key in access_dict:
+                    acc = access_dict[key]
+                    emp['telegram_user_id'] = acc['telegram_user_id']
+                    emp['telegram_username'] = acc['username']
+                    emp['phone'] = acc['phone']
+                    # Если есть полное имя в access - используем его
+                    if acc['full_name']:
+                        emp['full_name'] = acc['full_name']
+            
+            # Вставляем в employees
+            now = datetime.now().isoformat()
+            inserted = 0
+            
+            for key, emp in employees_dict.items():
+                cursor.execute("""
+                    INSERT INTO employees 
+                    (code, club, full_name, phone, telegram_user_id, telegram_username, 
+                     hired_date, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """, (
+                    emp['code'],
+                    emp['club'],
+                    emp['full_name'],
+                    emp.get('phone'),
+                    emp.get('telegram_user_id'),
+                    emp.get('telegram_username'),
+                    emp['hired_date'],
+                    now
+                ))
+                inserted += 1
+            
+            conn.commit()
+            print(f"[MIGRATION] Successfully migrated {inserted} employees")
+            conn.close()
+            
+        except Exception as e:
+            print(f"[MIGRATION] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            conn.close()
     
     def add_or_update_operation(self, club: str, date: str, code: str, 
                                 name: str, channel: str, amount: float, 
