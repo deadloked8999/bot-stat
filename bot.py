@@ -129,6 +129,8 @@ class UserState:
         self.payments_upload_data: Optional[list] = None
         self.payments_preview_data: Optional[list] = None
         self.payments_name_changes: Optional[list] = None
+        self.name_changes_data: Optional[list] = None
+        self.name_changes_index: int = 0
         
         # Для расходов на стилистов
         self.stylist_club: Optional[str] = None
@@ -5938,6 +5940,104 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         state.payments_upload_date = None
         state.payments_preview_data = None
         state.payments_name_changes = None
+        state.name_changes_data = None
+        state.name_changes_index = 0
+    
+    elif query.data == 'name_change_same':
+        # Тот же человек - просто меняем имя
+        change = state.name_changes_data[state.name_changes_index]
+        
+        # Обновляем в employees
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET full_name = ?, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (change['new_name'], datetime.now().isoformat(), 
+              change['code'], state.payments_upload_club))
+        
+        conn.commit()
+        conn.close()
+        
+        # Переходим к следующему вопросу
+        state.name_changes_index += 1
+        
+        if state.name_changes_index < len(state.name_changes_data):
+            # Ещё есть вопросы
+            change = state.name_changes_data[state.name_changes_index]
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("👤 Тот же человек", callback_data='name_change_same')],
+                [InlineKeyboardButton("🆕 Новый сотрудник", callback_data='name_change_new')],
+                [InlineKeyboardButton("❌ Отмена загрузки", callback_data='payments_save_cancel')]
+            ])
+            
+            await query.edit_message_text(
+                f"⚠️ ИЗМЕНЕНИЕ ИМЕНИ #{state.name_changes_index + 1}\n\n"
+                f"Код: {change['code']}\n"
+                f"Было: {change['old_name']}\n"
+                f"Стало: {change['new_name']}\n\n"
+                f"Что делать?",
+                reply_markup=keyboard
+            )
+        else:
+            # Все вопросы обработаны - показываем предпросмотр
+            await show_payments_preview(query.message, state)
+    
+    elif query.data == 'name_change_new':
+        # Новый сотрудник - увольняем старого, создаём нового
+        change = state.name_changes_data[state.name_changes_index]
+        
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime, timedelta
+        today = datetime.now().strftime('%Y-%m-%d')
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        now = datetime.now().isoformat()
+        
+        # 1. Увольняем старого
+        cursor.execute("""
+            UPDATE employees
+            SET is_active = 0, fired_date = ?, telegram_user_id = NULL, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (yesterday, now, change['code'], state.payments_upload_club))
+        
+        # 2. Создаём нового
+        cursor.execute("""
+            INSERT INTO employees 
+            (code, club, full_name, hired_date, is_active, created_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+        """, (change['code'], state.payments_upload_club, change['new_name'], today, now))
+        
+        conn.commit()
+        conn.close()
+        
+        # Переходим к следующему (тот же код что в name_change_same)
+        state.name_changes_index += 1
+        
+        if state.name_changes_index < len(state.name_changes_data):
+            change = state.name_changes_data[state.name_changes_index]
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("👤 Тот же человек", callback_data='name_change_same')],
+                [InlineKeyboardButton("🆕 Новый сотрудник", callback_data='name_change_new')],
+                [InlineKeyboardButton("❌ Отмена загрузки", callback_data='payments_save_cancel')]
+            ])
+            
+            await query.edit_message_text(
+                f"⚠️ ИЗМЕНЕНИЕ ИМЕНИ #{state.name_changes_index + 1}\n\n"
+                f"Код: {change['code']}\n"
+                f"Было: {change['old_name']}\n"
+                f"Стало: {change['new_name']}\n\n"
+                f"Что делать?",
+                reply_markup=keyboard
+            )
+        else:
+            await show_payments_preview(query.message, state)
     
     elif query.data in ['edit_club_moskvich', 'edit_club_anora']:
         club = 'Москвич' if query.data == 'edit_club_moskvich' else 'Анора'
@@ -6759,6 +6859,36 @@ async def handle_stylist_data_input(update: Update, state: UserState, text: str,
     msg += "\n💬 Продолжайте отправлять данные или нажмите: ГОТОВО"
     
     await update.message.reply_text(msg)
+
+
+async def show_payments_preview(message, state: UserState):
+    """Показать предпросмотр загружаемых выплат"""
+    payments_data = state.payments_preview_data
+    
+    preview_lines = [
+        f"💰 ПРЕДПРОСМОТР ВЫПЛАТ\n",
+        f"🏢 Клуб: {state.payments_upload_club}\n",
+        f"📅 Дата: {state.payments_upload_date}\n",
+        f"📊 Найдено записей: {len(payments_data)}\n\n"
+    ]
+    
+    for i, pay in enumerate(payments_data[:10], 1):
+        preview_lines.append(
+            f"{i}. {pay['code']} {pay['name']} - ИТОГО: {pay['total_shift']}\n"
+        )
+    
+    if len(payments_data) > 10:
+        preview_lines.append(f"\n... и ещё {len(payments_data) - 10} записей\n")
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ СОХРАНИТЬ", callback_data='payments_save_confirm')],
+        [InlineKeyboardButton("❌ ОТМЕНА", callback_data='payments_save_cancel')]
+    ])
+    
+    await message.reply_text(
+        ''.join(preview_lines),
+        reply_markup=keyboard
+    )
 
 
 async def show_stylist_preview(update: Update, state: UserState):
@@ -7768,8 +7898,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 state.payments_upload_date
             )
             
-            payments_data = result.get('payments', [])
-            name_changes = result.get('name_changes', [])
+            payments_data = result['payments']
+            name_changes = result['name_changes']
             
             if not payments_data:
                 await update.message.reply_text(
@@ -7780,49 +7910,53 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Показываем предпросмотр
-            preview_lines = [
-                f"💰 ПРЕДПРОСМОТР ВЫПЛАТ\n",
-                f"🏢 Клуб: {state.payments_upload_club}\n",
-                f"📅 Дата: {state.payments_upload_date}\n",
-                f"📊 Найдено записей: {len(payments_data)}\n"
-            ]
-            
-            # Показываем предупреждение об изменении имён
-            if name_changes:
-                preview_lines.append(f"\n⚠️ ИЗМЕНЕНИЯ ИМЁН ({len(name_changes)}):\n")
-                for change in name_changes[:5]:  # Показываем первые 5
-                    preview_lines.append(
-                        f"• {change['code']}: '{change['old_name']}' → '{change['new_name']}' (похожесть: {change['similarity']:.0%})\n"
-                    )
-                if len(name_changes) > 5:
-                    preview_lines.append(f"... и ещё {len(name_changes) - 5} изменений\n")
-                preview_lines.append("\n")
-            
-            preview_lines.append("\n")
-            
-            # Показываем первые 10 записей
-            for i, pay in enumerate(payments_data[:10], 1):
-                preview_lines.append(
-                    f"{i}. {pay['code']} {pay['name']} - ИТОГО: {pay['total_shift']}\n"
-                )
-            
-            if len(payments_data) > 10:
-                preview_lines.append(f"\n... и ещё {len(payments_data) - 10} записей\n")
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ СОХРАНИТЬ", callback_data='payments_save_confirm')],
-                [InlineKeyboardButton("❌ ОТМЕНА", callback_data='payments_save_cancel')]
-            ])
-            
-            await update.message.reply_text(
-                ''.join(preview_lines),
-                reply_markup=keyboard
-            )
-            
-            # Сохраняем данные в state для callback
+            # Сохраняем данные в state
             state.payments_preview_data = payments_data
-            state.payments_name_changes = name_changes  # Сохраняем изменения имён
+            
+            # Если есть изменения имён - показываем предупреждение
+            if name_changes:
+                # Формируем текст предупреждения
+                changes_text = ["⚠️ ОБНАРУЖЕНЫ ИЗМЕНЕНИЯ ИМЁН:\n\n"]
+                
+                for i, change in enumerate(name_changes, 1):
+                    changes_text.append(
+                        f"{i}. {change['code']}: {change['old_name']} → {change['new_name']}\n"
+                        f"   (похожесть: {int(change['similarity']*100)}%)\n\n"
+                    )
+                
+                changes_text.append(
+                    "Для каждого сотрудника выберите:\n"
+                    "• Тот же человек - просто изменить имя\n"
+                    "• Новый сотрудник - уволить старого, принять нового\n\n"
+                    "Нажмите ниже чтобы выбрать:"
+                )
+                
+                # Сохраняем данные в state
+                state.name_changes_data = name_changes
+                state.name_changes_index = 0  # Индекс текущего вопроса
+                
+                # Показываем первый вопрос
+                change = name_changes[0]
+                
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("👤 Тот же человек", callback_data='name_change_same')],
+                    [InlineKeyboardButton("🆕 Новый сотрудник", callback_data='name_change_new')],
+                    [InlineKeyboardButton("❌ Отмена загрузки", callback_data='payments_save_cancel')]
+                ])
+                
+                await update.message.reply_text(
+                    f"⚠️ ИЗМЕНЕНИЕ ИМЕНИ #{state.name_changes_index + 1}\n\n"
+                    f"Код: {change['code']}\n"
+                    f"Было: {change['old_name']}\n"
+                    f"Стало: {change['new_name']}\n\n"
+                    f"Что делать?",
+                    reply_markup=keyboard
+                )
+                
+                return
+            
+            # Если изменений нет - показываем обычный предпросмотр
+            await show_payments_preview(update.message, state)
             
         except Exception as e:
             await update.message.reply_text(
