@@ -1089,56 +1089,106 @@ class Database:
                 """, (club, emp['code'], emp['name'], main_code, main_name, now))
                 print(f"DEBUG: Merge record inserted for {emp['code']} - {emp['name']}")
                 
-                # Получаем все записи сотрудника которого объединяем
+                # Получаем все записи из operations
                 cursor.execute("""
                     SELECT date, channel, amount, original_line
                     FROM operations
-                    WHERE club = ? AND code = ? AND name_snapshot = ?
-                """, (club, emp['code'], emp['name']))
+                    WHERE club = ? AND code = ?
+                """, (club, emp['code']))
                 
-                records = cursor.fetchall()
-                print(f"DEBUG: Found {len(records)} records to merge for {emp['code']} - {emp['name']}")
+                ops_records = cursor.fetchall()
+                print(f"DEBUG: Found {len(ops_records)} operations records for {emp['code']}")
+                
+                # Получаем все записи из payments
+                cursor.execute("""
+                    SELECT date, 'ЗП' as channel, total_shift as amount, '' as original_line
+                    FROM payments
+                    WHERE club = ? AND code = ?
+                """, (club, emp['code']))
+                
+                pay_records = cursor.fetchall()
+                print(f"DEBUG: Found {len(pay_records)} payments records for {emp['code']}")
+                
+                # Объединяем
+                records = list(ops_records) + list(pay_records)
+                print(f"DEBUG: Total {len(records)} records to merge")
                 
                 # Для каждой записи:
-                # 1. Проверяем есть ли уже запись с (club, date, main_code, channel)
-                # 2. Если есть - агрегируем (добавляем amount)
-                # 3. Если нет - создаём новую с main_code
                 for date, channel, amount, original_line in records:
                     print(f"DEBUG: Merging record: date={date}, channel={channel}, amount={amount}")
                     
-                    # Проверяем существование
-                    cursor.execute("""
-                        SELECT id, amount FROM operations
-                        WHERE club = ? AND date = ? AND code = ? AND channel = ?
-                    """, (club, date, main_code, channel))
-                    
-                    existing = cursor.fetchone()
-                    
-                    if existing:
-                        # Агрегируем
-                        new_amount = existing[1] + amount
-                        print(f"DEBUG: Aggregating with existing record id={existing[0]}, old_amount={existing[1]}, new_amount={new_amount}")
+                    # Если это operations
+                    if channel != 'ЗП':
+                        # Проверяем существование
                         cursor.execute("""
-                            UPDATE operations
-                            SET amount = ?, name_snapshot = ?
-                            WHERE id = ?
-                        """, (new_amount, main_name, existing[0]))
+                            SELECT id, amount FROM operations
+                            WHERE club = ? AND date = ? AND code = ? AND channel = ?
+                        """, (club, date, main_code, channel))
+                        
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # Агрегируем
+                            new_amount = existing[1] + amount
+                            print(f"DEBUG: Aggregating operations: id={existing[0]}, new_amount={new_amount}")
+                            cursor.execute("""
+                                UPDATE operations
+                                SET amount = ?, name_snapshot = ?
+                                WHERE id = ?
+                            """, (new_amount, main_name, existing[0]))
+                        else:
+                            # Создаём новую
+                            print(f"DEBUG: Creating new operations record")
+                            cursor.execute("""
+                                INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (club, date, main_code, main_name, channel, amount, original_line, now))
+                        
+                        total_updated += 1
+                    
+                    # Если это payments
                     else:
-                        # Создаём новую запись
-                        print(f"DEBUG: Creating new record for main_code={main_code}")
+                        # Проверяем существование
                         cursor.execute("""
-                            INSERT INTO operations (club, date, code, name_snapshot, channel, amount, original_line, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (club, date, main_code, main_name, channel, amount, original_line, now))
-                    
-                    total_updated += 1
+                            SELECT date FROM payments
+                            WHERE club = ? AND date = ? AND code = ?
+                        """, (club, date, main_code))
+                        
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            print(f"DEBUG: Payment already exists for date={date}, skipping")
+                        else:
+                            # Копируем всю строку
+                            print(f"DEBUG: Copying payment record")
+                            cursor.execute("""
+                                INSERT INTO payments (club, date, code, name, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay, created_at)
+                                SELECT club, date, ?, name, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay, created_at
+                                FROM payments
+                                WHERE club = ? AND date = ? AND code = ?
+                            """, (main_code, club, date, emp['code']))
+                        
+                        total_updated += 1
                 
-                # Удаляем старые записи
+                # Удаляем старые записи из operations
                 cursor.execute("""
                     DELETE FROM operations
-                    WHERE club = ? AND code = ? AND name_snapshot = ?
-                """, (club, emp['code'], emp['name']))
-                print(f"DEBUG: Deleted old records for {emp['code']} - {emp['name']}")
+                    WHERE club = ? AND code = ?
+                """, (club, emp['code']))
+                
+                # Удаляем старые записи из payments
+                cursor.execute("""
+                    DELETE FROM payments
+                    WHERE club = ? AND code = ?
+                """, (club, emp['code']))
+                
+                # Удаляем из employees
+                cursor.execute("""
+                    DELETE FROM employees
+                    WHERE club = ? AND code = ?
+                """, (club, emp['code']))
+                
+                print(f"DEBUG: Deleted old records for {emp['code']}")
             
             conn.commit()
             print(f"DEBUG: Commit successful, total_updated={total_updated}")
