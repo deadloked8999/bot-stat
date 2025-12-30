@@ -1000,28 +1000,57 @@ class Database:
         
         return added
     
-    def get_all_employees(self, club: str) -> List[Dict]:
+    def get_all_employees(self, club: str) -> List[Dict[str, str]]:
         """
-        Получить список всех уникальных сотрудников клуба
-        Возвращает список словарей с полями: code, name
+        Получить список ВСЕХ уникальных сотрудников для клуба
+        Объединяет данные из employees, operations и payments
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
         try:
-            # Получаем уникальные пары (код, имя)
+            employees_dict = {}
+            
+            # 1. Из employees (приоритет)
             cursor.execute("""
-                SELECT DISTINCT code, name_snapshot as name
-                FROM operations
+                SELECT code, full_name
+                FROM employees
                 WHERE club = ?
-                ORDER BY code, name_snapshot
             """, (club,))
             
-            rows = cursor.fetchall()
-            employees = [{'code': row[0], 'name': row[1]} for row in rows]
+            for code, name in cursor.fetchall():
+                key = f"{code}_{name}"
+                employees_dict[key] = {'code': code, 'name': name, 'source': 'employees'}
+            
+            # 2. Из operations
+            cursor.execute("""
+                SELECT DISTINCT code, name_snapshot
+                FROM operations
+                WHERE club = ?
+            """, (club,))
+            
+            for code, name in cursor.fetchall():
+                key = f"{code}_{name}"
+                if key not in employees_dict:
+                    employees_dict[key] = {'code': code, 'name': name, 'source': 'operations'}
+            
+            # 3. Из payments
+            cursor.execute("""
+                SELECT DISTINCT code, name
+                FROM payments
+                WHERE club = ?
+            """, (club,))
+            
+            for code, name in cursor.fetchall():
+                key = f"{code}_{name}"
+                if key not in employees_dict:
+                    employees_dict[key] = {'code': code, 'name': name, 'source': 'payments'}
             
             conn.close()
-            return employees
+            
+            # Возвращаем список (без информации об источнике)
+            return [{'code': emp['code'], 'name': emp['name']} for emp in employees_dict.values()]
+            
         except Exception as e:
             print(f"Ошибка получения сотрудников: {e}")
             conn.close()
