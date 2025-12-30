@@ -1202,6 +1202,112 @@ class Database:
             conn.close()
             return 0
     
+    def split_merged_employee(self, club: str, merged_code: str) -> int:
+        """
+        Разделить ошибочно объединённого сотрудника обратно по именам
+        
+        Например:
+        СБ-ДЕНИС ЕРМАКОВ содержит записи с разными именами:
+        - Александр Ромашкан → создаём СБ-Александр Ромашкан
+        - Денис Ермаков → оставляем СБ-ДЕНИС ЕРМАКОВ
+        - Дмитрий Васенёв → создаём СБ-Дмитрий Васенёв
+        и т.д.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            from datetime import datetime
+            now = datetime.now().isoformat()
+            
+            # 1. Получаем все уникальные имена для этого кода из operations
+            cursor.execute("""
+                SELECT DISTINCT name_snapshot
+                FROM operations
+                WHERE club = ? AND code = ?
+            """, (club, merged_code))
+            
+            names_ops = [row[0] for row in cursor.fetchall()]
+            
+            # 2. Получаем все уникальные имена из payments
+            cursor.execute("""
+                SELECT DISTINCT name
+                FROM payments
+                WHERE club = ? AND code = ?
+            """, (club, merged_code))
+            
+            names_pay = [row[0] for row in cursor.fetchall()]
+            
+            # Объединяем уникальные имена
+            all_names = list(set(names_ops + names_pay))
+            
+            print(f"[SPLIT] Found {len(all_names)} unique names for {merged_code}")
+            print(f"[SPLIT] Names: {all_names}")
+            
+            if len(all_names) <= 1:
+                print("[SPLIT] Nothing to split (only one name)")
+                return 0
+            
+            total_split = 0
+            
+            # 3. Для каждого имени создаём отдельный код
+            for name in all_names:
+                # Генерируем новый код
+                if merged_code.startswith('СБ-'):
+                    new_code = f"СБ-{name}"
+                else:
+                    new_code = f"{merged_code.split('-')[0]}-{name}"
+                
+                print(f"[SPLIT] Processing {name} → {new_code}")
+                
+                # 4. Переносим записи из operations
+                cursor.execute("""
+                    UPDATE operations
+                    SET code = ?
+                    WHERE club = ? AND code = ? AND name_snapshot = ?
+                """, (new_code, club, merged_code, name))
+                
+                ops_updated = cursor.rowcount
+                print(f"[SPLIT] Updated {ops_updated} operations records")
+                
+                # 5. Переносим записи из payments
+                cursor.execute("""
+                    UPDATE payments
+                    SET code = ?
+                    WHERE club = ? AND code = ? AND name = ?
+                """, (new_code, club, merged_code, name))
+                
+                pay_updated = cursor.rowcount
+                print(f"[SPLIT] Updated {pay_updated} payments records")
+                
+                # 6. Создаём/обновляем запись в employees
+                cursor.execute("""
+                    INSERT OR REPLACE INTO employees 
+                    (code, club, full_name, is_active, hired_date, created_at)
+                    VALUES (?, ?, ?, 1, ?, ?)
+                """, (new_code, club, name, datetime.now().strftime('%Y-%m-%d'), now))
+                
+                total_split += ops_updated + pay_updated
+            
+            # 7. Удаляем старую запись объединённого сотрудника
+            cursor.execute("""
+                DELETE FROM employees
+                WHERE club = ? AND code = ?
+            """, (club, merged_code))
+            
+            conn.commit()
+            print(f"[SPLIT] Complete! Total records updated: {total_split}")
+            conn.close()
+            return total_split
+            
+        except Exception as e:
+            print(f"[SPLIT ERROR]: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            conn.close()
+            return 0
+    
     def check_employee_merge(self, club: str, code: str, name: str) -> Optional[Dict]:
         """
         Проверить был ли сотрудник объединён ранее
