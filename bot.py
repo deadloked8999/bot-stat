@@ -2267,6 +2267,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if employee['telegram_user_id']:
                 buttons.append([InlineKeyboardButton("🔐 Изменить TG ID", callback_data='emp_edit_tg')])
+                buttons.append([InlineKeyboardButton("🚫 Удалить TG ID (убрать доступ)", callback_data='emp_remove_tg')])
             else:
                 buttons.append([InlineKeyboardButton("➕ Добавить TG ID (дать доступ)", callback_data='emp_edit_tg')])
             
@@ -5912,6 +5913,33 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"Введите новый Telegram User ID (или 'удалить' для удаления):"
         )
         state.mode = 'awaiting_emp_tg'
+    
+    elif query.data == 'emp_remove_tg':
+        emp = state.edit_employee_selected
+        
+        # Удаляем TG ID
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        cursor.execute("""
+            UPDATE employees
+            SET telegram_user_id = NULL, updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+        
+        conn.commit()
+        conn.close()
+        
+        await query.edit_message_text(
+            f"✅ ДОСТУП УДАЛЁН\n\n"
+            f"Код: {emp['code']}\n"
+            f"Имя: {emp['name']}\n"
+            f"Telegram ID: удалён\n\n"
+            f"Доступ к боту отключён."
+        )
+        
+        state.edit_employee_selected = None
     
     elif query.data == 'emp_edit_birth':
         await query.edit_message_text(
