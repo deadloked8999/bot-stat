@@ -5894,6 +5894,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         print(f"DEBUG: Deleted old payments for {state.payments_upload_club} {state.payments_upload_date}")
         
+        # При сохранении применяем КАНОНИЧЕСКИЕ имена (из БД)
+        if state.name_changes_data:
+            for change in state.name_changes_data:
+                # Заменяем new_name на old_name в payments_data
+                for pay in state.payments_preview_data:
+                    if pay['code'] == change['code'] and pay['name'] == change['new_name']:
+                        pay['name'] = change['old_name']  # ← ИМЯ ИЗ БД!
+                        print(f"DEBUG: Applied canonical name: {change['code']} '{change['new_name']}' → '{change['old_name']}'")
+        
         # ПОТОМ ВСТАВЛЯЕМ НОВЫЕ
         saved_count = 0
         for payment in state.payments_preview_data:
@@ -5944,23 +5953,28 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         state.name_changes_index = 0
     
     elif query.data == 'name_change_same':
-        # Тот же человек - просто меняем имя
+        # Тот же человек - имя из файла приводим к имени из БД (не наоборот!)
         change = state.name_changes_data[state.name_changes_index]
         
-        # Обновляем в employees
+        # Добавляем в канонические имена БЕЗ изменения employees
         conn = db.get_connection()
         cursor = conn.cursor()
         
         from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        now = datetime.now().isoformat()
+        
+        # Добавляем каноническое имя = имя из БД (old_name)
         cursor.execute("""
-            UPDATE employees
-            SET full_name = ?, updated_at = ?
-            WHERE code = ? AND club = ?
-        """, (change['new_name'], datetime.now().isoformat(), 
-              change['code'], state.payments_upload_club))
+            INSERT OR IGNORE INTO employee_canonical_names 
+            (code, club, canonical_name, valid_from, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (change['code'], state.payments_upload_club, change['old_name'], today, now))
         
         conn.commit()
         conn.close()
+        
+        print(f"DEBUG: Canonical set: {change['code']} = {change['old_name']} (файл '{change['new_name']}' будет исправляться)")
         
         # Переходим к следующему вопросу
         state.name_changes_index += 1
