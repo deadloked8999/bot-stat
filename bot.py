@@ -128,6 +128,7 @@ class UserState:
         self.payments_upload_date: Optional[str] = None
         self.payments_upload_data: Optional[list] = None
         self.payments_preview_data: Optional[list] = None
+        self.payments_name_changes: Optional[list] = None
         
         # Для расходов на стилистов
         self.stylist_club: Optional[str] = None
@@ -525,6 +526,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.payments_upload_date = None
             state.payments_upload_data = None
             state.payments_preview_data = None
+            state.payments_name_changes = None
             state.stylist_club = None
             state.stylist_period_from = None
             state.stylist_period_to = None
@@ -5928,12 +5930,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         state.payments_upload_club = None
         state.payments_upload_date = None
         state.payments_preview_data = None
+        state.payments_name_changes = None
     
     elif query.data == 'payments_save_cancel':
         await query.edit_message_text("❌ Загрузка отменена")
         state.payments_upload_club = None
         state.payments_upload_date = None
         state.payments_preview_data = None
+        state.payments_name_changes = None
     
     elif query.data in ['edit_club_moskvich', 'edit_club_anora']:
         club = 'Москвич' if query.data == 'edit_club_moskvich' else 'Анора'
@@ -7757,12 +7761,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Парсим ЛИСТ ВЫПЛАТ
             excel_processor = ExcelProcessor()
-            payments_data = excel_processor.extract_payments_sheet(
+            result = excel_processor.extract_payments_sheet(
                 bytes(file_bytes), 
                 db, 
                 state.payments_upload_club,
                 state.payments_upload_date
             )
+            
+            payments_data = result.get('payments', [])
+            name_changes = result.get('name_changes', [])
             
             if not payments_data:
                 await update.message.reply_text(
@@ -7778,8 +7785,21 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💰 ПРЕДПРОСМОТР ВЫПЛАТ\n",
                 f"🏢 Клуб: {state.payments_upload_club}\n",
                 f"📅 Дата: {state.payments_upload_date}\n",
-                f"📊 Найдено записей: {len(payments_data)}\n\n"
+                f"📊 Найдено записей: {len(payments_data)}\n"
             ]
+            
+            # Показываем предупреждение об изменении имён
+            if name_changes:
+                preview_lines.append(f"\n⚠️ ИЗМЕНЕНИЯ ИМЁН ({len(name_changes)}):\n")
+                for change in name_changes[:5]:  # Показываем первые 5
+                    preview_lines.append(
+                        f"• {change['code']}: '{change['old_name']}' → '{change['new_name']}' (похожесть: {change['similarity']:.0%})\n"
+                    )
+                if len(name_changes) > 5:
+                    preview_lines.append(f"... и ещё {len(name_changes) - 5} изменений\n")
+                preview_lines.append("\n")
+            
+            preview_lines.append("\n")
             
             # Показываем первые 10 записей
             for i, pay in enumerate(payments_data[:10], 1):
@@ -7802,6 +7822,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Сохраняем данные в state для callback
             state.payments_preview_data = payments_data
+            state.payments_name_changes = name_changes  # Сохраняем изменения имён
             
         except Exception as e:
             await update.message.reply_text(

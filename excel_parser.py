@@ -3,10 +3,90 @@
 """
 import io
 import logging
+import sys
+sys.path.append('.')
 from typing import Dict, List, Any
+from difflib import SequenceMatcher
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def name_similarity(name1: str, name2: str) -> float:
+    """
+    Вычисление похожести двух имен с приоритетом фамилии (0.0 - 1.0)
+    Фамилия (последнее слово) имеет вес 70%, имя - 30%
+    + Словарь сокращений (Дима→Дмитрий)
+    + Нормализация Ё→Е
+    """
+    if not name1 or not name2:
+        return 0.0
+    
+    name1_clean = name1.lower().strip()
+    name2_clean = name2.lower().strip()
+    
+    # Разбиваем на части
+    parts1 = name1_clean.split()
+    parts2 = name2_clean.split()
+    
+    if not parts1 or not parts2:
+        return 0.0
+    
+    # Если одно из имен содержит только одно слово - обычное сравнение
+    if len(parts1) == 1 or len(parts2) == 1:
+        return SequenceMatcher(None, name1_clean, name2_clean).ratio()
+    
+    # Извлекаем фамилию (последнее слово) и имя (остальное)
+    surname1 = parts1[-1]
+    surname2 = parts2[-1]
+    firstname1 = ' '.join(parts1[:-1])
+    firstname2 = ' '.join(parts2[:-1])
+    
+    # Словарь сокращений имен
+    name_abbreviations = {
+        'дима': 'дмитрий',
+        'дмитр': 'дмитрий',
+        'саша': 'александр',
+        'алекс': 'александр',
+        'лёша': 'алексей',
+        'леша': 'алексей',
+        'макс': 'максим',
+        'максимка': 'максим',
+        'миша': 'михаил',
+        'паша': 'павел',
+        'женя': 'евгений',
+        'вова': 'владимир',
+        'володя': 'владимир',
+        'коля': 'николай',
+        'серёга': 'сергей',
+        'серега': 'сергей',
+        'андрюха': 'андрей',
+        'влад': 'владислав',
+        'юра': 'юрий',
+        'катя': 'екатерина',
+        'настя': 'анастасия',
+        'маша': 'мария',
+        'лена': 'елена',
+        'оля': 'ольга',
+        'таня': 'татьяна',
+        'вика': 'виктория',
+        'даша': 'дарья'
+    }
+    
+    # Нормализуем имена через словарь сокращений
+    firstname1_normalized = name_abbreviations.get(firstname1.lower(), firstname1.lower())
+    firstname2_normalized = name_abbreviations.get(firstname2.lower(), firstname2.lower())
+    
+    # Сравниваем фамилии
+    surname_similarity = SequenceMatcher(None, surname1, surname2).ratio()
+    
+    # Сравниваем имена (с учетом нормализации)
+    firstname_similarity = SequenceMatcher(None, firstname1_normalized, firstname2_normalized).ratio()
+    
+    # Взвешенная сумма: фамилия 70%, имя 30%
+    weighted_similarity = surname_similarity * 0.7 + firstname_similarity * 0.3
+    
+    return weighted_similarity
 
 
 class ExcelProcessor:
@@ -167,7 +247,7 @@ class ExcelProcessor:
             'extra': extra_notes
         }
     
-    def extract_payments_sheet(self, file_content: bytes, db, club: str, date: str) -> List[Dict[str, Any]]:
+    def extract_payments_sheet(self, file_content: bytes, db, club: str, date: str) -> Dict:
         """
         Извлечение данных из листа 'ЛИСТ ВЫПЛАТ'
         
@@ -192,9 +272,15 @@ class ExcelProcessor:
             file_content: содержимое Excel файла
             db: объект Database для проверки объединений сотрудников
             club: название клуба (Москвич/Анора)
+            date: дата для проверки канонических имен
         
         Returns:
-            Список словарей с данными по каждому сотруднику
+            {
+                'payments': [...],
+                'name_changes': [
+                    {'code': 'Д1', 'old_name': 'Ольга', 'new_name': 'Юлия', 'similarity': 0.2}
+                ]
+            }
         """
         # Пытаемся найти лист с разным регистром
         sheet_name = None
@@ -229,12 +315,13 @@ class ExcelProcessor:
             
         except Exception as e:
             logger.error(f"Error reading payments sheet: {e}")
-            return []
+            return {'payments': [], 'name_changes': []}
         
         if df.empty:
-            return []
+            return {'payments': [], 'name_changes': []}
         
         payments = []
+        name_changes = []
         
         # Проходим по строкам (пропускаем первые 2 строки с заголовками)
         for row_idx in range(2, len(df)):
@@ -308,11 +395,13 @@ class ExcelProcessor:
                 # Имя ВСЕГДА берём из столбца C (независимо от типа кода)
                 name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
                 name = str(name).strip()
+                name_from_file = name  # Сохраняем оригинал
                 
                 # ПРОВЕРКА ИМЕНИ С ПРИОРИТЕТОМ:
                 # 1. Каноническое имя (по дате)
                 # 2. Объединённое имя (employee_merges)
-                # 3. Имя из файла
+                # 3. Проверка в employees с сравнением похожести
+                # 4. Существующее имя в operations
                 
                 canonical = db.get_canonical_name(code, club, date)
                 if canonical:
@@ -327,10 +416,53 @@ class ExcelProcessor:
                         name = merge_info['merged_name']
                         print(f"DEBUG: Merged name used for {code}: {name}")
                     else:
-                        # Приоритет 3: Существующее имя в БД
-                        existing_names = db.get_employee_names_by_code(club, code)
-                        if existing_names:
-                            name = existing_names[0]
+                        # Приоритет 3: Проверка в employees с сравнением похожести
+                        # Импортируем функцию сравнения
+                        from bot import name_similarity
+                        
+                        # Проверяем есть ли сотрудник в employees
+                        conn = db.get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT full_name, is_active
+                            FROM employees
+                            WHERE club = ? AND code = ?
+                            LIMIT 1
+                        """, (club, code))
+                        
+                        row = cursor.fetchone()
+                        conn.close()
+                        
+                        name_from_file = name  # Оригинальное имя из файла
+                        
+                        if row:
+                            db_name, is_active = row
+                            
+                            # Сравниваем похожесть
+                            similarity = name_similarity(name, db_name)
+                            
+                            if similarity >= 0.85:
+                                # Опечатка - тихо исправляем
+                                print(f"DEBUG: Autocorrected {code}: '{name}' → '{db_name}' (similarity: {similarity:.2f})")
+                                name = db_name
+                            else:
+                                # Имя сильно изменилось - запоминаем
+                                print(f"DEBUG: Name changed {code}: '{db_name}' → '{name}' (similarity: {similarity:.2f})")
+                                name_changes.append({
+                                    'code': code,
+                                    'old_name': db_name,
+                                    'new_name': name,
+                                    'similarity': similarity
+                                })
+                                # Пока используем имя из файла
+                        else:
+                            # Новый сотрудник - ничего не делаем
+                            print(f"DEBUG: New employee: {code} - {name}")
+                            
+                            # Проверяем operations как fallback
+                            existing_names = db.get_employee_names_by_code(club, code)
+                            if existing_names:
+                                name = existing_names[0]
                 
                 # Извлекаем числовые данные
                 stavka = self._parse_decimal(df.iloc[row_idx, 3])       # D
@@ -381,5 +513,10 @@ class ExcelProcessor:
         logger.info(f"Extracted {len(payments)} payment records from 'ЛИСТ ВЫПЛАТ'")
         print(f"DEBUG: Total payments extracted: {len(payments)}")
         print(f"DEBUG: Payment codes: {[p['code'] for p in payments]}")
-        return payments
+        print(f"DEBUG: Name changes found: {len(name_changes)}")
+        
+        return {
+            'payments': payments,
+            'name_changes': name_changes
+        }
 
