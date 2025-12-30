@@ -99,10 +99,6 @@ class UserState:
         self.employees_club: Optional[str] = None
         self.merge_employee_indices: Optional[list] = None
         
-        # Для управления доступами
-        self.access_club: Optional[str] = None
-        self.employees_access_list: Optional[list] = None
-        
         # Для редактирования сотрудников
         self.edit_employees_list: Optional[list] = None
         self.edit_employees_club: Optional[str] = None
@@ -162,8 +158,6 @@ class UserState:
         self.delete_mass_date_from = None
         self.delete_mass_date_to = None
         self.delete_mass_preview = None
-        self.access_club = None
-        self.employees_access_list = None
         self.edit_employees_list = None
         self.edit_employees_club = None
         self.edit_employee_selected = None
@@ -263,7 +257,6 @@ def get_employees_menu_keyboard():
         [InlineKeyboardButton("🔗 Объединить сотрудников", callback_data='employees_merge')],
         [InlineKeyboardButton("✏️ Редактировать сотрудника", callback_data='employees_edit')],
         [InlineKeyboardButton("➕ Добавить сотрудника", callback_data='employees_add')],
-        [InlineKeyboardButton("🔐 Управление доступами", callback_data='employees_access')],
         [InlineKeyboardButton("❌ Назад", callback_data='employees_cancel')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -490,7 +483,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
             'awaiting_stylist_period', 'awaiting_stylist_data', 'awaiting_stylist_confirm', 
             'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data', 'awaiting_stylist_clarification',
-            'awaiting_access_add', 'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
+            'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
             'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth',
             'employee_awaiting_date', 'employee_awaiting_period',
             'нал', 'безнал'
@@ -568,7 +561,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
         'awaiting_stylist_period', 'awaiting_stylist_data',
         'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
-        'awaiting_salary_input', 'awaiting_access_add', 'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
+        'awaiting_salary_input', 'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
         'awaiting_emp_name', 'awaiting_emp_phone', 'awaiting_emp_tg', 'awaiting_emp_birth',
         'employee_awaiting_date', 'employee_awaiting_period'
     ]
@@ -1828,87 +1821,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Обработка добавления доступа
-    if state.mode == 'awaiting_access_add':
-        if text_lower == 'отмена':
-            await update.message.reply_text("❌ Добавление доступа отменено")
-            state.mode = None
-            state.access_club = None
-            state.employees_access_list = None
-            return
-        
-        # Парсим: НОМЕР TG_USER_ID [ФИО] [USERNAME] [ТЕЛЕФОН]
-        parts = text.split(maxsplit=5)
-        
-        if len(parts) < 2:
-            await update.message.reply_text(
-                "❌ Неверный формат\n\n"
-                "Минимум: НОМЕР TG_USER_ID\n"
-                "Пример: 5 123456789"
-            )
-            return
-        
-        try:
-            emp_index = int(parts[0])
-            tg_user_id = int(parts[1])
-        except:
-            await update.message.reply_text("❌ Номер и TG_USER_ID должны быть числами")
-            return
-        
-        # Проверка индекса
-        if emp_index < 1 or emp_index > len(state.employees_access_list):
-            await update.message.reply_text(
-                f"❌ Неверный номер\n"
-                f"Доступны номера от 1 до {len(state.employees_access_list)}"
-            )
-            return
-        
-        # Получаем сотрудника
-        employee = state.employees_access_list[emp_index - 1]
-        
-        # Опциональные поля
-        full_name = parts[2] if len(parts) > 2 else None
-        username = parts[3].replace('@', '') if len(parts) > 3 else None
-        phone = parts[4] if len(parts) > 4 else None
-        
-        # Добавляем в БД
-        try:
-            success = db.add_employee_access(
-                code=employee['code'],
-                club=state.access_club,
-                telegram_user_id=tg_user_id,
-                full_name=full_name,
-                username=username,
-                phone=phone
-            )
-            
-            if success:
-                await update.message.reply_text(
-                    f"✅ ДОСТУП ДОБАВЛЕН!\n\n"
-                    f"🏢 Клуб: {state.access_club}\n"
-                    f"Код: {employee['code']}\n"
-                    f"Имя в БД: {employee['name']}\n"
-                    f"TG User ID: {tg_user_id}\n"
-                    f"ФИО: {full_name or 'не указано'}\n"
-                    f"Username: @{username if username else 'не указано'}\n"
-                    f"Телефон: {phone or 'не указано'}\n\n"
-                    f"Теперь этот сотрудник может войти в бота!"
-                )
-            else:
-                await update.message.reply_text(
-                    f"❌ Ошибка при добавлении доступа\n\n"
-                    f"Возможно этот TG_USER_ID уже используется"
-                )
-        except Exception as e:
-            await update.message.reply_text(
-                f"❌ Ошибка при добавлении доступа:\n{str(e)}\n\n"
-                f"Возможно этот TG_USER_ID уже используется"
-            )
-        
-        state.mode = None
-        state.access_club = None
-        state.employees_access_list = None
-        return
-    
     # === ОБРАБОТКА ВВОДА ПРИ РЕДАКТИРОВАНИИ СОТРУДНИКОВ ===
     
     if state.mode == 'awaiting_emp_name':
@@ -5852,18 +5764,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             ])
         )
     
-    elif query.data == 'employees_access':
-        # Новая логика - управление доступами
-        await query.edit_message_text(
-            "🔐 УПРАВЛЕНИЕ ДОСТУПАМИ\n\n"
-            "Выберите клуб:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏢 Москвич", callback_data='access_club_moskvich')],
-                [InlineKeyboardButton("🏢 Анора", callback_data='access_club_anora')],
-                [InlineKeyboardButton("❌ Назад", callback_data='employees_menu')]
-            ])
-        )
-    
     elif query.data == 'employees_menu':
         # Возврат в главное меню сотрудников
         await query.edit_message_text(
@@ -6132,179 +6032,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         os.remove(temp_file.name)
     
     # Выбор клуба для управления доступами
-    elif query.data in ['access_club_moskvich', 'access_club_anora']:
-        club = 'Москвич' if query.data == 'access_club_moskvich' else 'Анора'
-        
-        # Получаем список всех сотрудников с доступами
-        access_list = db.get_all_employee_access(club)
-        
-        # Получаем список всех сотрудников клуба (для выбора)
-        all_employees = db.get_all_employees(club)
-        
-        # Формируем сообщение
-        lines = [f"🔐 ДОСТУПЫ К БОТУ: {club}\n"]
-        lines.append("=" * 40 + "\n\n")
-        
-        if access_list:
-            lines.append("✅ АКТИВНЫЕ ДОСТУПЫ:\n\n")
-            for acc in access_list:
-                if acc['is_active']:
-                    status_icon = "✅"
-                    username_info = f"@{acc['username']}" if acc['username'] else ""
-                    lines.append(f"{status_icon} {acc['code']} - {acc['full_name'] or 'Нет имени'}\n")
-                    lines.append(f"   TG ID: {acc['telegram_user_id']} {username_info}\n")
-                    if acc['phone']:
-                        lines.append(f"   📱 {acc['phone']}\n")
-                    lines.append("\n")
-        else:
-            lines.append("❌ Нет активных доступов\n\n")
-        
-        lines.append(f"📊 Всего сотрудников в клубе: {len(all_employees)}\n")
-        lines.append(f"🔐 С доступом к боту: {len([a for a in access_list if a['is_active']])}\n")
-        
-        await query.edit_message_text(
-            ''.join(lines),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Добавить доступ", callback_data=f'access_add_{club.lower()}')],
-                [InlineKeyboardButton("📋 Список всех", callback_data=f'access_list_{club.lower()}')],
-                [InlineKeyboardButton("❌ Назад", callback_data='employees_access')]
-            ])
-        )
-        
-        state.access_club = club
-    
-    # Список всех сотрудников для добавления доступа
-    elif query.data.startswith('access_list_'):
-        club_lower = query.data.replace('access_list_', '')
-        club = 'Москвич' if club_lower == 'москвич' else 'Анора'
-        
-        # Получаем всех сотрудников
-        all_employees = db.get_all_employees(club)
-        access_list = db.get_all_employee_access(club)
-        
-        # Создаём множество кодов с доступом
-        codes_with_access = {acc['code'] for acc in access_list if acc['is_active']}
-        
-        # Сортируем
-        employees_sorted = sorted(all_employees, key=lambda x: (x['code'], x['name']))
-        
-        # Формируем файл
-        lines = [f"СОТРУДНИКИ КЛУБА {club.upper()} (для добавления доступа)\n"]
-        lines.append("=" * 50 + "\n\n")
-        
-        for i, emp in enumerate(employees_sorted, 1):
-            access_icon = "🔐" if emp['code'] in codes_with_access else "❌"
-            lines.append(f"{i}. {emp['code']} - {emp['name']} {access_icon}\n")
-        
-        lines.append("\n" + "=" * 50 + "\n")
-        lines.append(f"Всего сотрудников: {len(employees_sorted)}\n")
-        lines.append(f"С доступом: {len(codes_with_access)}\n")
-        
-        # Сохраняем во временный файл
-        import tempfile
-        temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
-        temp_file.write(''.join(lines))
-        temp_file.close()
-        
-        # Отправляем файл
-        with open(temp_file.name, 'rb') as f:
-            await query.message.reply_document(
-                document=f,
-                filename=f"dostup_{club.lower()}.txt",
-                caption=f"🔐 Список сотрудников клуба {club}\n\n🔐 = есть доступ\n❌ = нет доступа"
-            )
-        
-        # Инструкция
-        await query.message.reply_text(
-            "➕ ДЛЯ ДОБАВЛЕНИЯ ДОСТУПА:\n\n"
-            "Отправьте данные в формате:\n"
-            "НОМЕР TG_USER_ID [ФИО] [USERNAME] [ТЕЛЕФОН]\n\n"
-            "📝 Примеры:\n"
-            "• 5 123456789\n"
-            "• 5 123456789 Юлия Иванова\n"
-            "• 5 123456789 Юлия Иванова @julia_i\n"
-            "• 5 123456789 Юлия Иванова @julia_i +79001234567\n\n"
-            "❌ Для отмены: отмена"
-        )
-        
-        # Сохраняем список в state
-        state.employees_access_list = employees_sorted
-        state.access_club = club
-        state.mode = 'awaiting_access_add'
-        
-        # Удаляем временный файл
-        import os
-        os.remove(temp_file.name)
-    
-    # Добавление доступа (перенаправление на список)
-    elif query.data.startswith('access_add_'):
-        # Перенаправляем на список сотрудников
-        club_lower = query.data.replace('access_add_', '')
-        await query.answer()  # Закрываем callback
-        # Используем тот же обработчик что и для access_list_
-        query.data = f'access_list_{club_lower}'
-        # Рекурсивно вызываем обработчик списка
-        # Но проще просто вызвать логику напрямую
-        club = 'Москвич' if club_lower == 'москвич' else 'Анора'
-        
-        # Получаем всех сотрудников
-        all_employees = db.get_all_employees(club)
-        access_list = db.get_all_employee_access(club)
-        
-        # Создаём множество кодов с доступом
-        codes_with_access = {acc['code'] for acc in access_list if acc['is_active']}
-        
-        # Сортируем
-        employees_sorted = sorted(all_employees, key=lambda x: (x['code'], x['name']))
-        
-        # Формируем файл
-        lines = [f"СОТРУДНИКИ КЛУБА {club.upper()} (для добавления доступа)\n"]
-        lines.append("=" * 50 + "\n\n")
-        
-        for i, emp in enumerate(employees_sorted, 1):
-            access_icon = "🔐" if emp['code'] in codes_with_access else "❌"
-            lines.append(f"{i}. {emp['code']} - {emp['name']} {access_icon}\n")
-        
-        lines.append("\n" + "=" * 50 + "\n")
-        lines.append(f"Всего сотрудников: {len(employees_sorted)}\n")
-        lines.append(f"С доступом: {len(codes_with_access)}\n")
-        
-        # Сохраняем во временный файл
-        import tempfile
-        temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
-        temp_file.write(''.join(lines))
-        temp_file.close()
-        
-        # Отправляем файл
-        with open(temp_file.name, 'rb') as f:
-            await query.message.reply_document(
-                document=f,
-                filename=f"dostup_{club.lower()}.txt",
-                caption=f"🔐 Список сотрудников клуба {club}\n\n🔐 = есть доступ\n❌ = нет доступа"
-            )
-        
-        # Инструкция
-        await query.message.reply_text(
-            "➕ ДЛЯ ДОБАВЛЕНИЯ ДОСТУПА:\n\n"
-            "Отправьте данные в формате:\n"
-            "НОМЕР TG_USER_ID [ФИО] [USERNAME] [ТЕЛЕФОН]\n\n"
-            "📝 Примеры:\n"
-            "• 5 123456789\n"
-            "• 5 123456789 Юлия Иванова\n"
-            "• 5 123456789 Юлия Иванова @julia_i\n"
-            "• 5 123456789 Юлия Иванова @julia_i +79001234567\n\n"
-            "❌ Для отмены: отмена"
-        )
-        
-        # Сохраняем список в state
-        state.employees_access_list = employees_sorted
-        state.access_club = club
-        state.mode = 'awaiting_access_add'
-        
-        # Удаляем временный файл
-        import os
-        os.remove(temp_file.name)
-    
     # Выбор клуба для списка сотрудников
     elif query.data in ['employees_club_moskvich', 'employees_club_anora']:
         club = 'Москвич' if query.data == 'employees_club_moskvich' else 'Анора'
