@@ -127,6 +127,7 @@ class UserState:
         self.payments_upload_club: Optional[str] = None
         self.payments_upload_date: Optional[str] = None
         self.payments_upload_data: Optional[list] = None
+        self.payments_preview_data: Optional[list] = None
         
         # Для расходов на стилистов
         self.stylist_club: Optional[str] = None
@@ -480,7 +481,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'awaiting_delete_mass_club', 'awaiting_delete_mass_period', 'awaiting_delete_mass_confirm',
             'awaiting_delete_employee_input',
             'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file', 'awaiting_upload_confirm',
-            'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
+            'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file',
             'awaiting_stylist_period', 'awaiting_stylist_data', 'awaiting_stylist_confirm', 
             'awaiting_stylist_edit_number', 'awaiting_stylist_edit_data', 'awaiting_stylist_clarification',
             'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
@@ -523,6 +524,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.payments_upload_club = None
             state.payments_upload_date = None
             state.payments_upload_data = None
+            state.payments_preview_data = None
             state.stylist_club = None
             state.stylist_period_from = None
             state.stylist_period_to = None
@@ -558,7 +560,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'awaiting_edit_params', 'awaiting_edit_data',
         'awaiting_delete_choice', 'awaiting_delete_mass_club',
         'awaiting_upload_club', 'awaiting_upload_date', 'awaiting_upload_file',
-        'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file', 'awaiting_payments_save_confirm',
+        'awaiting_payments_upload_club', 'awaiting_payments_upload_date', 'awaiting_payments_upload_file',
         'awaiting_stylist_period', 'awaiting_stylist_data',
         'awaiting_merge_confirm', 'awaiting_duplicate_confirm', 'awaiting_sb_merge_confirm',
         'awaiting_salary_input', 'awaiting_employee_edit_select', 'awaiting_emp_code', 'awaiting_add_employee',
@@ -1273,82 +1275,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     
     # Обработка подтверждения сохранения ЗП
-    if state.mode == 'awaiting_payments_save_confirm':
-        if text_lower == 'сохранить':
-            if not state.payments_upload_data:
-                await update.message.reply_text("❌ Данные не найдены")
-                state.mode = None
-                return
-            
-            await update.message.reply_text("⏳ Сохраняю данные в базу...")
-            
-            # СНАЧАЛА УДАЛЯЕМ ВСЕ СТАРЫЕ ЗАПИСИ ДЛЯ ЭТОЙ ДАТЫ И КЛУБА
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM payments 
-                WHERE club = ? AND date = ?
-            """, (state.payments_upload_club, state.payments_upload_date))
-            conn.commit()
-            conn.close()
-            
-            print(f"DEBUG: Deleted old payments for {state.payments_upload_club} {state.payments_upload_date}")
-            
-            # ПОТОМ ВСТАВЛЯЕМ НОВЫЕ
-            saved_count = 0
-            for payment in state.payments_upload_data:
-                db.add_payment(
-                    club=state.payments_upload_club,
-                    date=state.payments_upload_date,
-                    code=payment['code'],
-                    name=payment['name'],
-                    stavka=payment['stavka'],
-                    lm_3=payment['lm_3'],
-                    percent_5=payment['percent_5'],
-                    promo=payment['promo'],
-                    crz=payment['crz'],
-                    cons=payment['cons'],
-                    tips=payment['tips'],
-                    fines=payment['fines'],
-                    total_shift=payment['total_shift'],
-                    debt=payment['debt'],
-                    debt_nal=payment['debt_nal'],
-                    to_pay=payment['to_pay']
-                )
-                saved_count += 1
-            
-            # DEBUG: Проверяем что сохранилось
-            db.debug_payments(state.payments_upload_club, state.payments_upload_date)
-            
-            await update.message.reply_text(
-                f"✅ СОХРАНЕНО!\n\n"
-                f"🏢 Клуб: {state.payments_upload_club}\n"
-                f"📅 Дата: {state.payments_upload_date}\n"
-                f"📊 Записей: {saved_count}\n\n"
-                f"Данные можно просмотреть через кнопку ЗП"
-            )
-            
-            # Очищаем состояние
-            state.payments_upload_club = None
-            state.payments_upload_date = None
-            state.payments_upload_data = None
-            state.mode = None
-            
-        elif text_lower == 'отмена' or text_lower == '❌ отмена':
-            state.payments_upload_club = None
-            state.payments_upload_date = None
-            state.payments_upload_data = None
-            state.mode = None
-            await update.message.reply_text(
-                "❌ Загрузка ЗП отменена\n\n"
-                "Используйте кнопки меню:",
-                reply_markup=get_main_keyboard()
-            )
-        else:
-            await update.message.reply_text(
-                "⚠️ Введите СОХРАНИТЬ для сохранения или ОТМЕНА для отмены"
-            )
-        return
     
     # Команда "нал"
     if text_lower == 'нал':
@@ -5939,6 +5865,76 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         state.edit_employees_list = None
         state.edit_employees_club = None
     
+    # === ОБРАБОТКА ЗАГРУЗКИ ВЫПЛАТ ===
+    
+    elif query.data == 'payments_save_confirm':
+        # Берём данные из state
+        if not state.payments_preview_data:
+            await query.edit_message_text("❌ Данные не найдены")
+            state.payments_upload_club = None
+            state.payments_upload_date = None
+            state.payments_preview_data = None
+            return
+        
+        await query.edit_message_text("⏳ Сохраняю данные в базу...")
+        
+        # СНАЧАЛА УДАЛЯЕМ ВСЕ СТАРЫЕ ЗАПИСИ ДЛЯ ЭТОЙ ДАТЫ И КЛУБА
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM payments 
+            WHERE club = ? AND date = ?
+        """, (state.payments_upload_club, state.payments_upload_date))
+        conn.commit()
+        conn.close()
+        
+        print(f"DEBUG: Deleted old payments for {state.payments_upload_club} {state.payments_upload_date}")
+        
+        # ПОТОМ ВСТАВЛЯЕМ НОВЫЕ
+        saved_count = 0
+        for payment in state.payments_preview_data:
+            db.add_payment(
+                club=state.payments_upload_club,
+                date=state.payments_upload_date,
+                code=payment['code'],
+                name=payment['name'],
+                stavka=payment['stavka'],
+                lm_3=payment['lm_3'],
+                percent_5=payment['percent_5'],
+                promo=payment['promo'],
+                crz=payment['crz'],
+                cons=payment['cons'],
+                tips=payment['tips'],
+                fines=payment['fines'],
+                total_shift=payment['total_shift'],
+                debt=payment['debt'],
+                debt_nal=payment['debt_nal'],
+                to_pay=payment['to_pay']
+            )
+            saved_count += 1
+        
+        # DEBUG: Проверяем что сохранилось
+        db.debug_payments(state.payments_upload_club, state.payments_upload_date)
+        
+        await query.edit_message_text(
+            f"✅ ДАННЫЕ СОХРАНЕНЫ!\n\n"
+            f"🏢 Клуб: {state.payments_upload_club}\n"
+            f"📅 Дата: {state.payments_upload_date}\n"
+            f"📊 Записей: {saved_count}\n\n"
+            f"Данные можно просмотреть через кнопку ЗП"
+        )
+        
+        # Очищаем состояние
+        state.payments_upload_club = None
+        state.payments_upload_date = None
+        state.payments_preview_data = None
+    
+    elif query.data == 'payments_save_cancel':
+        await query.edit_message_text("❌ Загрузка отменена")
+        state.payments_upload_club = None
+        state.payments_upload_date = None
+        state.payments_preview_data = None
+    
     elif query.data in ['edit_club_moskvich', 'edit_club_anora']:
         club = 'Москвич' if query.data == 'edit_club_moskvich' else 'Анора'
         
@@ -7794,14 +7790,18 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(payments_data) > 10:
                 preview_lines.append(f"\n... и ещё {len(payments_data) - 10} записей\n")
             
-            preview_lines.append("\n✅ Для сохранения напишите: СОХРАНИТЬ\n")
-            preview_lines.append("❌ Для отмены: ОТМЕНА")
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ СОХРАНИТЬ", callback_data='payments_save_confirm')],
+                [InlineKeyboardButton("❌ ОТМЕНА", callback_data='payments_save_cancel')]
+            ])
             
-            await update.message.reply_text(''.join(preview_lines))
+            await update.message.reply_text(
+                ''.join(preview_lines),
+                reply_markup=keyboard
+            )
             
-            # Сохраняем данные в state
-            state.payments_upload_data = payments_data
-            state.mode = 'awaiting_payments_save_confirm'
+            # Сохраняем данные в state для callback
+            state.payments_preview_data = payments_data
             
         except Exception as e:
             await update.message.reply_text(
