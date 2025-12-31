@@ -14,10 +14,44 @@ class DataParser:
     @staticmethod
     def normalize_code(code: str) -> str:
         """
-        Нормализация кода сотрудника
-        Оставляем кириллицу как есть, только приводим к верхнему регистру
+        Нормализация кода сотрудника:
+        1. Trim пробелов
+        2. ВЕРХНИЙ РЕГИСТР
+        3. Латиница → кириллица (Dj → ДЖ, A → А, и т.д.)
         """
-        return code.strip().upper()
+        if not code:
+            return ''
+        
+        code = code.strip()
+        
+        # Карта замены латиница → кириллица
+        lat_to_cyr = {
+            'A': 'А', 'a': 'а',
+            'B': 'В', 'b': 'в', 
+            'C': 'С', 'c': 'с',
+            'E': 'Е', 'e': 'е',
+            'H': 'Н', 'h': 'н',
+            'K': 'К', 'k': 'к',
+            'M': 'М', 'm': 'м',
+            'O': 'О', 'o': 'о',
+            'P': 'Р', 'p': 'р',
+            'T': 'Т', 't': 'т',
+            'X': 'Х', 'x': 'х',
+            'Y': 'У', 'y': 'у',
+        }
+        
+        # Специальные случаи (двухбуквенные)
+        code = code.replace('Dj', 'ДЖ')
+        code = code.replace('DJ', 'ДЖ')
+        code = code.replace('dj', 'ДЖ')
+        
+        # Посимвольная замена
+        result = []
+        for char in code:
+            result.append(lat_to_cyr.get(char, char))
+        
+        # ВЕРХНИЙ РЕГИСТР
+        return ''.join(result).upper()
     
     @staticmethod
     def is_code(text: str) -> bool:
