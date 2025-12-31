@@ -8,6 +8,7 @@ sys.path.append('.')
 from typing import Dict, List, Any
 from difflib import SequenceMatcher
 import pandas as pd
+from parser import DataParser
 
 logger = logging.getLogger(__name__)
 
@@ -392,6 +393,9 @@ class ExcelProcessor:
                     # Не подходит ни под один вариант - пропускаем
                     continue
                 
+                # НОРМАЛИЗАЦИЯ КОДА ПЕРЕД ПРОВЕРКАМИ В БД
+                code = DataParser.normalize_code(code)
+                
                 # Имя ВСЕГДА берём из столбца C (независимо от типа кода)
                 name = df.iloc[row_idx, 2] if not pd.isna(df.iloc[row_idx, 2]) else ""
                 name = str(name).strip()
@@ -413,6 +417,8 @@ class ExcelProcessor:
                     merge_info = db.check_employee_merge(club, code, name)
                     if merge_info:
                         code = merge_info['merged_code']
+                        # Нормализуем merged_code на всякий случай
+                        code = DataParser.normalize_code(code)
                         name = merge_info['merged_name']
                         print(f"DEBUG: Merged name used for {code}: {name}")
                     else:
