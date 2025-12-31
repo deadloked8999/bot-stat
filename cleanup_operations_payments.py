@@ -68,45 +68,8 @@ for old_code, club in payments_codes:
 print(f"\nОбновлено записей в payments: {normalized_count}")
 conn.commit()
 
-# === 2. УДАЛЕНИЕ МУСОРНЫХ КОДОВ ===
-print("\n=== ШАГ 2: УДАЛЕНИЕ МУСОРНЫХ КОДОВ ===\n")
-
-trash_codes = [
-    'АНАР-ДЕПОЗИТ', 'АРАМ', 'АРТУР', 'БОНУС', 'ВХОД',
-    'ДЕПОЗИТ,БОНУС', 'НАТИК', 'САМВЕЛ-БОНУС+ДЕПОЗИТ',
-    'ТАКС', 'Ф1', 'ФАРИД-ВХОД+БОНУС+ДЕПОЗИТ',
-    'ДЕПОЗИТ', 'БОНУС+ДЕПОЗИТ', 'ВХОД+БОНУС'
-]
-
-# Нормализуем мусорные коды
-trash_codes_normalized = [DataParser.normalize_code(code) for code in trash_codes]
-
-deleted_ops = 0
-deleted_pay = 0
-
-for code in trash_codes_normalized:
-    # Удаляем из operations
-    cursor.execute("""
-        DELETE FROM operations WHERE code = ?
-    """, (code,))
-    ops_deleted = cursor.rowcount
-    deleted_ops += ops_deleted
-    
-    # Удаляем из payments
-    cursor.execute("""
-        DELETE FROM payments WHERE code = ?
-    """, (code,))
-    pay_deleted = cursor.rowcount
-    deleted_pay += pay_deleted
-    
-    if ops_deleted > 0 or pay_deleted > 0:
-        print(f"Удалено: {code} (operations: {ops_deleted}, payments: {pay_deleted})")
-
-print(f"\nВсего удалено: operations={deleted_ops}, payments={deleted_pay}")
-conn.commit()
-
-# === 3. ОБЪЕДИНЕНИЕ ВАРИАНТОВ НАПИСАНИЯ ===
-print("\n=== ШАГ 3: ОБЪЕДИНЕНИЕ ВАРИАНТОВ НАПИСАНИЯ ===\n")
+# === 2. ОБЪЕДИНЕНИЕ ВАРИАНТОВ НАПИСАНИЯ ===
+print("\n=== ШАГ 2: ОБЪЕДИНЕНИЕ ВАРИАНТОВ НАПИСАНИЯ ===\n")
 
 merge_rules = {
     'Анора': {
@@ -166,49 +129,8 @@ for club, rules in merge_rules.items():
 print(f"\nВсего объединено: operations={total_merged_ops}, payments={total_merged_pay}")
 conn.commit()
 
-# === 4. ИСПРАВЛЕНИЕ ИМЁН ===
-print("\n=== ШАГ 4: ИСПРАВЛЕНИЕ ИМЁН ===\n")
-
-# ОФ4: Ника → Вероника
-cursor.execute("""
-    UPDATE operations
-    SET name_snapshot = 'Вероника'
-    WHERE club = 'Анора' AND code = 'ОФ4' AND name_snapshot = 'Ника'
-""")
-ops_updated = cursor.rowcount
-
-cursor.execute("""
-    UPDATE payments
-    SET name = 'Вероника'
-    WHERE club = 'Анора' AND code = 'ОФ4' AND name = 'Ника'
-""")
-pay_updated = cursor.rowcount
-
-if ops_updated > 0 or pay_updated > 0:
-    print(f"ОФ4 Ника → Вероника (operations: {ops_updated}, payments: {pay_updated})")
-
-# БСТ5: Леша → Алексей
-cursor.execute("""
-    UPDATE operations
-    SET name_snapshot = 'Алексей'
-    WHERE club = 'Анора' AND code = 'БСТ5' AND name_snapshot = 'Леша'
-""")
-ops_updated = cursor.rowcount
-
-cursor.execute("""
-    UPDATE payments
-    SET name = 'Алексей'
-    WHERE club = 'Анора' AND code = 'БСТ5' AND name = 'Леша'
-""")
-pay_updated = cursor.rowcount
-
-if ops_updated > 0 or pay_updated > 0:
-    print(f"БСТ5 Леша → Алексей (operations: {ops_updated}, payments: {pay_updated})")
-
-conn.commit()
-
-# === 5. ОБЪЕДИНЕНИЕ СБ ===
-print("\n=== ШАГ 5: ОБЪЕДИНЕНИЕ СБ ===\n")
+# === 3. ОБЪЕДИНЕНИЕ СБ ===
+print("\n=== ШАГ 3: ОБЪЕДИНЕНИЕ СБ ===\n")
 
 sb_merge_rules = {
     'СБ-АЛЕКСАНДР ЧЕРНЫЙ': [
@@ -314,9 +236,109 @@ for main_code, variants in sb_merge_rules.items():
 print(f"\nВсего объединено СБ: operations={total_sb_ops}, payments={total_sb_pay}")
 conn.commit()
 
+# === 4. УДАЛЕНИЕ ДУБЛЕЙ ===
+print("\n=== ШАГ 4: УДАЛЕНИЕ ДУБЛЕЙ ===\n")
+
+# Для operations: дубли по club, date, code, channel, amount
+print("Удаление дублей в operations...")
+cursor.execute("""
+    DELETE FROM operations
+    WHERE id NOT IN (
+        SELECT MIN(id)
+        FROM operations
+        GROUP BY club, date, code, channel, amount
+    )
+""")
+duplicates_ops = cursor.rowcount
+print(f"Удалено дублей в operations: {duplicates_ops}")
+
+# Для payments: дубли по club, date, code (UNIQUE constraint, но могут быть с разными именами)
+print("\nУдаление дублей в payments...")
+cursor.execute("""
+    DELETE FROM payments
+    WHERE id NOT IN (
+        SELECT MIN(id)
+        FROM payments
+        GROUP BY club, date, code
+    )
+""")
+duplicates_pay = cursor.rowcount
+print(f"Удалено дублей в payments: {duplicates_pay}")
+
+conn.commit()
+
+# === 5. УДАЛЕНИЕ МУСОРНЫХ КОДОВ ===
+print("\n=== ШАГ 5: УДАЛЕНИЕ МУСОРНЫХ КОДОВ ===\n")
+
+trash_codes = [
+    'БОНУС', 'ВХОД', 'ДЕПОЗИТ,БОНУС', 'АНАР-ДЕПОЗИТ',
+    'САМВЕЛ-БОНУС+ДЕПОЗИТ', 'ФАРИД-ВХОД+БОНУС+ДЕПОЗИТ',
+    'ТАКС', 'НАТИК', 'АРАМ', 'АРТУР', 'Ф1'
+]
+
+# Нормализуем мусорные коды
+trash_codes_normalized = [DataParser.normalize_code(code) for code in trash_codes]
+
+# Удаляем из operations
+placeholders = ','.join(['?'] * len(trash_codes_normalized))
+cursor.execute(f"""
+    DELETE FROM operations WHERE code IN ({placeholders})
+""", trash_codes_normalized)
+deleted_ops = cursor.rowcount
+
+# Удаляем из payments
+cursor.execute(f"""
+    DELETE FROM payments WHERE code IN ({placeholders})
+""", trash_codes_normalized)
+deleted_pay = cursor.rowcount
+
+print(f"Удалено мусорных записей: operations={deleted_ops}, payments={deleted_pay}")
+
+conn.commit()
+
+# === 6. ИСПРАВЛЕНИЕ ИМЁН ===
+print("\n=== ШАГ 6: ИСПРАВЛЕНИЕ ИМЁН ===\n")
+
+# ОФ4: Ника → Вероника
+cursor.execute("""
+    UPDATE operations
+    SET name_snapshot = 'Вероника'
+    WHERE club = 'Анора' AND code = 'ОФ4' AND name_snapshot = 'Ника'
+""")
+ops_updated = cursor.rowcount
+
+cursor.execute("""
+    UPDATE payments
+    SET name = 'Вероника'
+    WHERE club = 'Анора' AND code = 'ОФ4' AND name = 'Ника'
+""")
+pay_updated = cursor.rowcount
+
+if ops_updated > 0 or pay_updated > 0:
+    print(f"ОФ4 Ника → Вероника (operations: {ops_updated}, payments: {pay_updated})")
+
+# БСТ5: Леша → Алексей
+cursor.execute("""
+    UPDATE operations
+    SET name_snapshot = 'Алексей'
+    WHERE club = 'Анора' AND code = 'БСТ5' AND name_snapshot = 'Леша'
+""")
+ops_updated = cursor.rowcount
+
+cursor.execute("""
+    UPDATE payments
+    SET name = 'Алексей'
+    WHERE club = 'Анора' AND code = 'БСТ5' AND name = 'Леша'
+""")
+pay_updated = cursor.rowcount
+
+if ops_updated > 0 or pay_updated > 0:
+    print(f"БСТ5 Леша → Алексей (operations: {ops_updated}, payments: {pay_updated})")
+
+conn.commit()
+
 conn.close()
 
 print("\n" + "=" * 60)
 print("✅ ОЧИСТКА ЗАВЕРШЕНА!")
 print("=" * 60)
-
