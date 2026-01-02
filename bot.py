@@ -5707,6 +5707,122 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                 pass
         ws_itogo.column_dimensions[column_letter].width = min(max_length + 2, 20)
     
+    # === ЛИСТ КАТЕГОРИИ ===
+    ws_categories = wb.create_sheet(title="КАТЕГОРИИ")
+    
+    # Собираем данные из employee_totals (уже есть в коде)
+    # Фильтруем: исключаем СБ, УБОРЩИЦА, ДЖ*, К*
+    filtered_employees = []
+    for key, emp_data in employee_totals.items():
+        emp_code = emp_data['code']  # display_code
+        # Исключаем коды
+        if emp_code.startswith('СБ') or emp_code == 'СБ':
+            continue
+        if 'УБОРЩИЦА' in emp_code.upper() or 'Уборщица' in emp_code:
+            continue
+        if emp_code.startswith('ДЖ'):
+            continue
+        if emp_code.startswith('К') and len(emp_code) > 1 and emp_code[1].isdigit():
+            continue
+        
+        filtered_employees.append({
+            'code': emp_code,
+            'name': emp_data['name'],
+            'total': emp_data['total_shift']  # ИТОГО выплат
+        })
+    
+    # Сортируем по сумме (по убыванию)
+    filtered_employees.sort(key=lambda x: x['total'], reverse=True)
+    
+    # Разбиваем на категории
+    cat_1 = [e for e in filtered_employees if e['total'] < 200000]  # < 200k
+    cat_2 = [e for e in filtered_employees if 200000 <= e['total'] < 350000]  # 200-350k
+    cat_3 = [e for e in filtered_employees if 350000 <= e['total'] < 450000]  # 350-450k
+    cat_4 = [e for e in filtered_employees if e['total'] >= 450000]  # > 450k
+    
+    # Стили
+    category_header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    category_header_font = Font(bold=True, color="FFFFFF", size=11)
+    category_fill_1 = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # Красный
+    category_fill_2 = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # Жёлтый
+    category_fill_3 = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # Зелёный
+    category_fill_4 = PatternFill(start_color="9BC2E6", end_color="9BC2E6", fill_type="solid")  # Синий
+    category_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Заголовок
+    ws_categories['A1'] = "КАТЕГОРИИ СОТРУДНИКОВ"
+    ws_categories['A1'].font = Font(bold=True, size=14)
+    ws_categories['A2'] = f"Период: {date_from} .. {date_to}"
+    ws_categories['A2'].font = Font(size=11)
+    
+    row_num = 4
+    
+    # Функция для добавления категории
+    def add_category(ws, start_row, title, employees, fill_color):
+        # Заголовок категории
+        ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
+        start_row += 1
+        
+        # Шапка таблицы
+        headers = ['КОД', 'ИМЯ', 'ИТОГО']
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=start_row, column=col, value=header)
+            cell.font = category_header_font
+            cell.fill = category_header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = category_border
+        start_row += 1
+        
+        # Данные
+        total_sum = 0
+        for emp in employees:
+            row_data = [emp['code'], emp['name'], emp['total']]
+            for col, value in enumerate(row_data, 1):
+                cell = ws.cell(row=start_row, column=col, value=value)
+                cell.fill = fill_color
+                cell.border = category_border
+                if col == 3:  # Сумма
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.number_format = '#,##0'
+                else:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            total_sum += emp['total']
+            start_row += 1
+        
+        # Итого по категории
+        ws.cell(row=start_row, column=1, value=f"Всего: {len(employees)} чел.").font = Font(bold=True)
+        total_cell = ws.cell(row=start_row, column=3, value=total_sum)
+        total_cell.font = Font(bold=True)
+        total_cell.number_format = '#,##0'
+        total_cell.alignment = Alignment(horizontal='right')
+        start_row += 2
+        
+        return start_row
+    
+    # Добавляем категории
+    row_num = add_category(ws_categories, row_num, "🔴 МЕНЬШЕ 200,000₽", cat_1, category_fill_1)
+    row_num = add_category(ws_categories, row_num, "🟡 ОТ 200,000₽ ДО 350,000₽", cat_2, category_fill_2)
+    row_num = add_category(ws_categories, row_num, "🟢 ОТ 350,000₽ ДО 450,000₽", cat_3, category_fill_3)
+    row_num = add_category(ws_categories, row_num, "💎 БОЛЬШЕ 450,000₽", cat_4, category_fill_4)
+    
+    # Автоподгонка ширины
+    for column in ws_categories.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        ws_categories.column_dimensions[column_letter].width = min(max_length + 2, 30)
+    
     # Сохраняем и отправляем
     club_str = '_'.join([c.lower() for c in clubs])
     filename = f"zp_{club_str}_{date_from}_{date_to}.xlsx"
