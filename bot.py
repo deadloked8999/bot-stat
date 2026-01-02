@@ -5263,7 +5263,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     
     # Создаём Excel
     wb = Workbook()
-    wb.remove(wb.active)  # Удаляем дефолтный лист
+    # НЕ удаляем активный лист - используем его для ИТОГО
     
     club_names = ', '.join(clubs)  # Определяем для использования в create_sheet
     
@@ -5487,17 +5487,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         
         return totals
     
-    # Создаём лист для каждой даты
-    for date in sorted(payments_by_date.keys()):
-        try:
-            year, month, day = date.split('-')
-            sheet_name = f"{day}.{month}.{year[2:]}"
-        except:
-            sheet_name = date
-        
-        ws = wb.create_sheet(title=sheet_name)
-        create_sheet(ws, sheet_name, payments_by_date[date], show_date_col=True)
-    
+    # === СНАЧАЛА СОЗДАЁМ ЛИСТ ИТОГО (будет первым) ===
     # Создаём лист ИТОГО с группировкой по (код, имя)
     employee_totals = {}
     for payment in all_payments:
@@ -5535,8 +5525,9 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         employee_totals[key]['debt'] += payment['debt']
         employee_totals[key]['debt_nal'] += payment['debt_nal']
     
-    # Создаём лист ИТОГО
-    ws_itogo = wb.create_sheet(title="ИТОГО")
+    # Используем активный лист для ИТОГО (будет первым)
+    ws_itogo = wb.active
+    ws_itogo.title = "ИТОГО"
     club_names = ', '.join(clubs)
     ws_itogo['A1'] = f"Отчёт ЗП: {club_names}"
     ws_itogo['A1'].font = Font(bold=True, size=14)
@@ -5715,8 +5706,8 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                 pass
         ws_itogo.column_dimensions[column_letter].width = min(max_length + 2, 20)
     
-    # === ЛИСТ КАТЕГОРИИ ===
-    ws_categories = wb.create_sheet(title="КАТЕГОРИИ")
+    # === ЛИСТ КАТЕГОРИИ (будет вторым) ===
+    ws_categories = wb.create_sheet(title="КАТЕГОРИИ", index=1)
     
     # Собираем данные из employee_totals (уже есть в коде)
     # Фильтруем: исключаем СБ, УБОРЩИЦА, ДЖ*, К*
@@ -5830,6 +5821,17 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             except:
                 pass
         ws_categories.column_dimensions[column_letter].width = min(max_length + 2, 30)
+    
+    # === СОЗДАЁМ ЛИСТЫ ПО ДАТАМ (будут после ИТОГО и КАТЕГОРИЙ) ===
+    for date in sorted(payments_by_date.keys()):
+        try:
+            year, month, day = date.split('-')
+            sheet_name = f"{day}.{month}.{year[2:]}"
+        except:
+            sheet_name = date
+        
+        ws = wb.create_sheet(title=sheet_name)
+        create_sheet(ws, sheet_name, payments_by_date[date], show_date_col=True)
     
     # Сохраняем и отправляем
     club_str = '_'.join([c.lower() for c in clubs])
