@@ -361,8 +361,12 @@ class ExcelProcessor:
                         pass
                 
                 # ГЕНЕРАЦИЯ КОДА
+                # СПЕЦИАЛЬНАЯ ОБРАБОТКА: СБ + Н → СБН
+                if category.upper() == 'СБ' and number.upper() == 'Н':
+                    code = 'СБН'
+                
                 # 1. Есть категория + номер (и номер - это цифры)
-                if category and number and number.replace('.', '').replace(',', '').isdigit():
+                elif category and number and number.replace('.', '').replace(',', '').isdigit():
                     code = f"{category}{number}"
                 
                 # 2. Есть категория, НЕТ номера
