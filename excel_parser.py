@@ -401,6 +401,11 @@ class ExcelProcessor:
                 name = str(name).strip()
                 name_from_file = name  # Сохраняем оригинал
                 
+                # Специальная обработка для УБОРЩИЦЫ
+                if code == 'УБОРЩИЦА':
+                    name = club  # Имя = название клуба (Москвич или Анора)
+                    print(f"DEBUG: УБОРЩИЦА renamed to: {name}")
+                
                 # ПРОВЕРКА ИМЕНИ С ПРИОРИТЕТОМ:
                 # 1. Каноническое имя (по дате)
                 # 2. Объединённое имя (employee_merges)
