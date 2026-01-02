@@ -268,6 +268,19 @@ class Database:
                 ON employees(is_active)
             """)
             
+            # Создаём таблицу истории сотрудников
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS employee_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL,
+                    club TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    hired_date TEXT,
+                    fired_date TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            
             conn.commit()
             print("[INFO] Table employees created successfully")
             conn.close()

@@ -4855,7 +4855,9 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     
     # Шапка таблицы
     headers = [
-        'Дата', 'Клуб', 'Код', 'Имя', 'Ставка', '3% ЛМ', '5%', 'Промо', 
+        'Дата', 'Клуб', 'Код', 'Имя', 
+        'Принята', 'Уволена', 'Статус',
+        'Ставка', '3% ЛМ', '5%', 'Промо',
         'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
         'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
     ]
@@ -4874,6 +4876,9 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
         'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'final_pay': 0
     }
+    
+    # Получаем соединение для запросов к БД
+    conn = db.get_connection()
     
     # Данные
     for payment in all_payments:
@@ -4895,12 +4900,73 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         elif display_code.startswith('Уборщица'):
             display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
         
+        # Получаем даты найма/увольнения
+        cursor_temp = conn.cursor()
+        
+        # Сначала проверяем employees
+        cursor_temp.execute("""
+            SELECT hired_date, fired_date, is_active
+            FROM employees
+            WHERE code = ? AND club = ?
+        """, (payment['code'], payment['club']))
+        
+        emp_row = cursor_temp.fetchone()
+        
+        if emp_row:
+            hired_date = emp_row[0]
+            fired_date = emp_row[1]
+            is_active = emp_row[2]
+        else:
+            # Проверяем employee_history
+            cursor_temp.execute("""
+                SELECT hired_date, fired_date
+                FROM employee_history
+                WHERE code = ? AND club = ?
+                  AND ? BETWEEN hired_date AND COALESCE(fired_date, '9999-12-31')
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (payment['code'], payment['club'], payment['date']))
+            
+            hist_row = cursor_temp.fetchone()
+            if hist_row:
+                hired_date = hist_row[0]
+                fired_date = hist_row[1]
+                is_active = 0
+            else:
+                hired_date = None
+                fired_date = None
+                is_active = 1
+        
+        # Форматируем даты
+        if hired_date:
+            try:
+                year, month, day = hired_date.split('-')
+                hired_str = f"{day}.{month}.{year[2:]}"
+            except:
+                hired_str = hired_date
+        else:
+            hired_str = '-'
+        
+        if fired_date:
+            try:
+                year, month, day = fired_date.split('-')
+                fired_str = f"{day}.{month}.{year[2:]}"
+            except:
+                fired_str = fired_date
+        else:
+            fired_str = '-'
+        
+        status_icon = '✅' if is_active else '🗂️'
+        
         # Записываем строку
         row_data = [
             date_short,
             payment['club'],
             display_code,  # Используем обработанный код
             payment['name'],
+            hired_str,
+            fired_str,
+            status_icon,
             payment['stavka'],
             payment['lm_3'],
             payment['percent_5'],
@@ -4919,7 +4985,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         for col, value in enumerate(row_data, 1):
             cell = ws.cell(row=row_num, column=col, value=value)
             cell.border = border
-            if col > 4:  # Числовые столбцы
+            if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
                 cell.alignment = Alignment(horizontal='right', vertical='center')
             else:
                 cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -4940,11 +5006,14 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         
         row_num += 1
     
+    # Закрываем соединение
+    conn.close()
+    
     # Строка ИТОГО
     vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
     
     itogo_data = [
-        'ИТОГО', '', '', '',
+        'ИТОГО', '', '', '', '', '', '',  # Дата, Клуб, Код, Имя, Принята, Уволена, Статус
         totals['stavka'],
         totals['lm_3'],
         totals['percent_5'],
@@ -4964,7 +5033,7 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         cell = ws.cell(row=row_num, column=col, value=value)
         cell.font = Font(bold=True)
         cell.border = border
-        if col > 4:
+        if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
             cell.alignment = Alignment(horizontal='right', vertical='center')
         else:
             cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -6009,23 +6078,31 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         cursor = conn.cursor()
         
         from datetime import datetime, timedelta
-        today = datetime.now().strftime('%Y-%m-%d')
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        file_date = datetime.strptime(state.payments_upload_date, '%Y-%m-%d')
+        yesterday = (file_date - timedelta(days=1)).strftime('%Y-%m-%d')
+        today = file_date.strftime('%Y-%m-%d')
         now = datetime.now().isoformat()
         
-        # 1. Увольняем старого
+        # 1. Копируем старого сотрудника в employee_history
         cursor.execute("""
-            UPDATE employees
-            SET is_active = 0, fired_date = ?, telegram_user_id = NULL, updated_at = ?
+            INSERT INTO employee_history 
+            (code, club, full_name, hired_date, fired_date, created_at)
+            SELECT code, club, full_name, hired_date, ?, ?
+            FROM employees
             WHERE code = ? AND club = ?
         """, (yesterday, now, change['code'], state.payments_upload_club))
         
-        # 2. Создаём нового
+        # 2. Обновляем employees (меняем имя на нового)
         cursor.execute("""
-            INSERT INTO employees 
-            (code, club, full_name, hired_date, is_active, created_at)
-            VALUES (?, ?, ?, ?, 1, ?)
-        """, (change['code'], state.payments_upload_club, change['new_name'], today, now))
+            UPDATE employees
+            SET full_name = ?, 
+                hired_date = ?,
+                is_active = 1, 
+                fired_date = NULL,
+                telegram_user_id = NULL,
+                updated_at = ?
+            WHERE code = ? AND club = ?
+        """, (change['new_name'], today, now, change['code'], state.payments_upload_club))
         
         conn.commit()
         conn.close()
