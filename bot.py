@@ -5315,6 +5315,9 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         
         # Данные
         for payment in payments_list:
+            # НОРМАЛИЗАЦИЯ КОДА
+            normalized_code = DataParser.normalize_code(payment['code'])
+            
             # Преобразуем дату
             try:
                 year, month, day = payment['date'].split('-')
@@ -5327,7 +5330,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             k_vyplate = round(payment['debt_nal'] + payment['debt'] - vychet_10)  # Без стилистов
             
             # Обработка кода для отображения
-            display_code = payment['code']
+            display_code = normalized_code
             if display_code.startswith('СБ-'):
                 display_code = 'СБ'  # Убираем имя из кода для отображения
             elif display_code.startswith('Уборщица'):
@@ -5336,12 +5339,12 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             # Получаем даты найма/увольнения
             cursor_temp = conn.cursor()
             
-            # Сначала проверяем employees
+            # Сначала проверяем employees (используем нормализованный код)
             cursor_temp.execute("""
                 SELECT hired_date, fired_date, is_active
                 FROM employees
                 WHERE code = ? AND club = ?
-            """, (payment['code'], payment['club']))
+            """, (normalized_code, payment['club']))
             
             emp_row = cursor_temp.fetchone()
             
@@ -5350,7 +5353,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                 fired_date = emp_row[1]
                 is_active = emp_row[2]
             else:
-                # Проверяем employee_history
+                # Проверяем employee_history (используем нормализованный код)
                 cursor_temp.execute("""
                     SELECT hired_date, fired_date
                     FROM employee_history
@@ -5358,7 +5361,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                       AND ? BETWEEN hired_date AND COALESCE(fired_date, '9999-12-31')
                     ORDER BY created_at DESC
                     LIMIT 1
-                """, (payment['code'], payment['club'], payment['date']))
+                """, (normalized_code, payment['club'], payment['date']))
                 
                 hist_row = cursor_temp.fetchone()
                 if hist_row:
@@ -5494,10 +5497,15 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         create_sheet(ws, sheet_name, payments_by_date[date], show_date_col=True)
     
     # Создаём лист ИТОГО с группировкой по (код, имя)
+    from parser import DataParser
+    
     employee_totals = {}
     for payment in all_payments:
+        # НОРМАЛИЗАЦИЯ КОДА ПЕРЕД ГРУППИРОВКОЙ
+        normalized_code = DataParser.normalize_code(payment['code'])
+        
         # Обработка кода для отображения
-        display_code = payment['code']
+        display_code = normalized_code
         if display_code.startswith('СБ-'):
             display_code = 'СБ'
         elif display_code.startswith('Уборщица'):
@@ -5507,7 +5515,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         if key not in employee_totals:
             employee_totals[key] = {
                 'code': display_code,
-                'real_code': payment['code'],  # Реальный код для поиска в БД
+                'real_code': normalized_code,  # Нормализованный код для поиска в БД
                 'name': payment['name'],
                 'club': payment['club'],  # Сохраняем клуб
                 'stavka': 0, 'lm_3': 0, 'percent_5': 0, 'promo': 0,
