@@ -5210,6 +5210,8 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from datetime import datetime, timedelta
+    from parser import DataParser
     
     # Получаем все данные из БД
     all_payments = []
@@ -5497,8 +5499,6 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         create_sheet(ws, sheet_name, payments_by_date[date], show_date_col=True)
     
     # Создаём лист ИТОГО с группировкой по (код, имя)
-    from parser import DataParser
-    
     employee_totals = {}
     for payment in all_payments:
         # НОРМАЛИЗАЦИЯ КОДА ПЕРЕД ГРУППИРОВКОЙ
