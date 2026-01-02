@@ -116,6 +116,6 @@ conn.commit()
 conn.close()
 
 print("\n" + "=" * 60)
-print("✅ ОБЪЕДИНЕНИЕ ЗАВЕРШЕНО!")
+print("OK: ОБЪЕДИНЕНИЕ ЗАВЕРШЕНО!")
 print("=" * 60)
 

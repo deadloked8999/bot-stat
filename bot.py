@@ -5716,8 +5716,8 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     for key, emp_data in employee_totals.items():
         emp_code = emp_data['code']  # display_code
         # Исключаем коды
-        if emp_code.startswith('СБ') or emp_code == 'СБ':
-            continue
+        if (emp_code.startswith('СБ') or emp_code == 'СБ') and emp_code != 'СБН':
+            continue  # Исключаем всех СБ КРОМЕ СБН
         if 'УБОРЩИЦА' in emp_code.upper() or 'Уборщица' in emp_code:
             continue
         if emp_code.startswith('ДЖ'):
