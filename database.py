@@ -1017,12 +1017,15 @@ class Database:
         """
         Получить список ВСЕХ уникальных сотрудников для клуба
         Объединяет данные из employees, operations и payments
+        Нормализует коды для объединения вариантов
         """
+        from parser import DataParser
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         
         try:
-            employees_dict = {}
+            employees_dict = {}  # Ключ: нормализованный код
             
             # 1. Из employees (приоритет)
             cursor.execute("""
@@ -1032,8 +1035,10 @@ class Database:
             """, (club,))
             
             for code, name in cursor.fetchall():
-                key = f"{code}_{name}"
-                employees_dict[key] = {'code': code, 'name': name, 'source': 'employees'}
+                normalized_code = DataParser.normalize_code(code)
+                # Используем только код как ключ, чтобы объединить варианты
+                if normalized_code not in employees_dict:
+                    employees_dict[normalized_code] = {'code': normalized_code, 'name': name, 'source': 'employees'}
             
             # 2. Из operations
             cursor.execute("""
@@ -1043,9 +1048,10 @@ class Database:
             """, (club,))
             
             for code, name in cursor.fetchall():
-                key = f"{code}_{name}"
-                if key not in employees_dict:
-                    employees_dict[key] = {'code': code, 'name': name, 'source': 'operations'}
+                normalized_code = DataParser.normalize_code(code)
+                # Добавляем только если нет в employees
+                if normalized_code not in employees_dict:
+                    employees_dict[normalized_code] = {'code': normalized_code, 'name': name, 'source': 'operations'}
             
             # 3. Из payments
             cursor.execute("""
@@ -1055,9 +1061,10 @@ class Database:
             """, (club,))
             
             for code, name in cursor.fetchall():
-                key = f"{code}_{name}"
-                if key not in employees_dict:
-                    employees_dict[key] = {'code': code, 'name': name, 'source': 'payments'}
+                normalized_code = DataParser.normalize_code(code)
+                # Добавляем только если нет в employees
+                if normalized_code not in employees_dict:
+                    employees_dict[normalized_code] = {'code': normalized_code, 'name': name, 'source': 'payments'}
             
             conn.close()
             
