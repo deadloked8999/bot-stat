@@ -623,7 +623,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(
                 f"❌ {error}\n\n"
-                f"Введите дату (формат: 30,10) или напишите: отмена"
+                f"Введите дату (формат: 30,10 или 28,12,25) или напишите: отмена"
             )
         return
     
@@ -635,7 +635,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"💰 ЗАГРУЗКА ЗП\n"
                 f"🏢 Клуб: {state.payments_upload_club}\n\n"
-                f"📅 Введите дату (формат: 30,10):"
+                f"📅 Введите дату (формат: 30,10 или 28,12,25):"
             )
             state.mode = 'awaiting_payments_upload_date'
         else:
@@ -657,7 +657,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(
                 f"❌ {error}\n\n"
-                f"Введите дату (формат: 30,10) или напишите: отмена"
+                f"Введите дату (формат: 30,10 или 28,12,25) или напишите: отмена"
             )
         return
     
@@ -676,7 +676,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(
                 f"❌ {error}\n\n"
-                f"Введите дату (формат: 30,10) или напишите: отмена"
+                f"Введите дату (формат: 30,10 или 28,12,25) или напишите: отмена"
             )
             return
     
@@ -5899,7 +5899,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 f"💰 ЗАГРУЗКА ЗП\n"
                 f"🏢 Клуб: Москвич\n\n"
-                f"📅 Введите дату (формат: 30,10):"
+                f"📅 Введите дату (формат: 30,10 или 28,12,25):"
             )
             state.mode = 'awaiting_payments_upload_date'
         else:
@@ -5937,7 +5937,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 f"💰 ЗАГРУЗКА ЗП\n"
                 f"🏢 Клуб: Анора\n\n"
-                f"📅 Введите дату (формат: 30,10):"
+                f"📅 Введите дату (формат: 30,10 или 28,12,25):"
             )
             state.mode = 'awaiting_payments_upload_date'
         else:

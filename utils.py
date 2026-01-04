@@ -16,7 +16,9 @@ def get_current_date(timezone_str: str = config.TIMEZONE) -> str:
 
 def parse_short_date(date_str: str, timezone_str: str = config.TIMEZONE) -> Tuple[bool, Optional[str], str]:
     """
-    Парсинг короткого формата даты: 30,10 или 30.10 или 3,10 -> 2025-10-30
+    Парсинг короткого формата даты: 
+    - 30,10 или 30.10 -> 2026-10-30 (текущий год)
+    - 28,12,25 или 28.12.25 -> 2025-12-28 (с указанным годом)
     Возвращает: (успех, дата, сообщение об ошибке)
     """
     date_str = date_str.strip().replace(',', '.')
@@ -26,9 +28,37 @@ def parse_short_date(date_str: str, timezone_str: str = config.TIMEZONE) -> Tupl
         tz = pytz.timezone(timezone_str)
         current_year = datetime.now(tz).year
         
-        # Разбиваем на день и месяц
+        # Разбиваем на части
         parts = date_str.split('.')
-        if len(parts) == 2:
+        
+        # Формат с годом: 28.12.25
+        if len(parts) == 3:
+            day = int(parts[0])
+            month = int(parts[1])
+            year_short = int(parts[2])
+            
+            # Преобразуем короткий год в полный (25 -> 2025, 26 -> 2026)
+            if year_short < 100:
+                # Если год <= 50, это 20XX, иначе 19XX
+                if year_short <= 50:
+                    year = 2000 + year_short
+                else:
+                    year = 1900 + year_short
+            else:
+                year = year_short
+            
+            # Валидация
+            if month < 1 or month > 12:
+                return False, None, f"Неверный месяц: {month}. Должен быть от 1 до 12"
+            if day < 1 or day > 31:
+                return False, None, f"Неверный день: {day}. Должен быть от 1 до 31"
+            
+            # Формируем дату
+            date_obj = datetime(year, month, day)
+            return True, date_obj.strftime('%Y-%m-%d'), ""
+        
+        # Формат без года: 30.10 (используется текущий год)
+        elif len(parts) == 2:
             day = int(parts[0])
             month = int(parts[1])
             
@@ -41,8 +71,9 @@ def parse_short_date(date_str: str, timezone_str: str = config.TIMEZONE) -> Tupl
             # Формируем дату
             date_obj = datetime(current_year, month, day)
             return True, date_obj.strftime('%Y-%m-%d'), ""
+        
         else:
-            return False, None, f"Неверный формат даты: '{date_str}'. Используйте формат: 30,10 или 3,10"
+            return False, None, f"Неверный формат даты: '{date_str}'. Используйте: 30,10 или 28,12,25"
     
     except ValueError as e:
         return False, None, f"Ошибка парсинга даты: {e}"
