@@ -1836,6 +1836,34 @@ class Database:
         cursor = conn.cursor()
         
         try:
+            # Ищем в таблице employees (основная таблица)
+            cursor.execute("""
+                SELECT id, code, club, full_name, telegram_user_id, telegram_username,
+                       phone, birth_date, hired_date, fired_date, is_active, created_at
+                FROM employees
+                WHERE telegram_user_id = ? AND is_active = 1
+            """, (telegram_user_id,))
+            
+            row = cursor.fetchone()
+            
+            if row:
+                conn.close()
+                return {
+                    'id': row[0],
+                    'code': row[1],
+                    'club': row[2],
+                    'full_name': row[3],
+                    'telegram_user_id': row[4],
+                    'username': row[5],
+                    'phone': row[6],
+                    'birth_date': row[7],
+                    'hired_date': row[8],
+                    'fired_date': row[9],
+                    'is_active': bool(row[10]),
+                    'created_at': row[11]
+                }
+            
+            # Если не нашли в employees, пробуем employee_access (для обратной совместимости)
             cursor.execute("""
                 SELECT id, code, club, telegram_user_id, full_name, username, 
                        phone, birth_date, is_active, created_at
@@ -1862,6 +1890,8 @@ class Database:
             return None
         except Exception as e:
             print(f"Ошибка получения сотрудника по Telegram ID: {e}")
+            import traceback
+            traceback.print_exc()
             conn.close()
             return None
     
