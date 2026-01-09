@@ -783,66 +783,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Команда "Моя ЗП" - последняя начисленная ЗП
+        # Команда "Моя ЗП" - показываем меню выбора
         if text_lower in ['моя зп', '💰 моя зп', 'зп', '💵 зп']:
-            # Получаем последнюю запись из payments
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
-                       fines, total_shift, debt, debt_nal, to_pay
-                FROM payments
-                WHERE club = ? AND code = ?
-                ORDER BY date DESC
-                LIMIT 1
-            """, (state.employee_club, state.employee_code))
-            
-            row = cursor.fetchone()
-            conn.close()
-            
-            if not row:
-                await update.message.reply_text(
-                    "❌ Данные о ЗП не найдены\n\n"
-                    "Возможно, ЗП ещё не начислена или файл не загружен."
-                )
-                return
-            
-            date, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
-            
-            # Пересчитываем К выплате
-            vychet_10 = round(debt * 0.1) if debt else 0
-            k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
-            
-            msg = (
-                f"💰 ВАША ПОСЛЕДНЯЯ ЗП\n\n"
-                f"📅 Дата: {date}\n"
-                f"💼 Код: {state.employee_code}\n"
-                f"👤 {state.employee_name}\n\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💵 Ставка: {int(stavka)}\n"
-                f"📊 3% ЛМ: {int(lm_3)}\n"
-                f"📊 5%: {int(percent_5)}\n"
-                f"🎉 Промо: {int(promo)}\n"
-                f"🍽 CRZ: {int(crz)}\n"
-                f"🥂 Cons: {int(cons)}\n"
-                f"💸 Чаевые: {int(tips)}\n"
+            keyboard = [
+                [InlineKeyboardButton("📅 Последняя ЗП", callback_data='emp_salary_last')],
+                [InlineKeyboardButton("📆 ЗП за дату", callback_data='emp_salary_date')],
+                [InlineKeyboardButton("📊 ЗП за период", callback_data='emp_salary_period')],
+                [InlineKeyboardButton("❌ Отмена", callback_data='emp_salary_cancel')]
+            ]
+            await update.message.reply_text(
+                "💰 МОЯ ЗАРПЛАТА\n\n"
+                "Выберите действие:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            
-            if fines:
-                msg += f"⚠️ Штрафы: {int(fines)}\n"
-            
-            msg += (
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 ИТОГО выплат: {int(total_shift)}\n"
-                f"💵 Получила на смене: {int(to_pay or 0)}\n"
-                f"📋 Долг БН: {int(debt or 0)}\n"
-                f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
-            )
-            
-            await update.message.reply_text(msg)
             return
         
         # Команда "История выплат"
@@ -6985,6 +6938,104 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text('\n'.join(response))
         else:
             await query.answer("❌ Ошибка: данные не найдены", show_alert=True)
+    
+    # === ОБРАБОТКА МЕНЮ "МОЯ ЗП" ДЛЯ СОТРУДНИКОВ ===
+    elif query.data == 'emp_salary_last':
+        # Показываем последнюю ЗП
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+                   fines, total_shift, debt, debt_nal, to_pay
+            FROM payments
+            WHERE club = ? AND code = ?
+            ORDER BY date DESC
+            LIMIT 1
+        """, (state.employee_club, state.employee_code))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            await query.edit_message_text(
+                "❌ Данные о ЗП не найдены\n\n"
+                "Возможно, ЗП ещё не начислена или файл не загружен."
+            )
+            return
+        
+        date, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+        
+        # Пересчитываем К выплате
+        vychet_10 = round(debt * 0.1) if debt else 0
+        k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+        
+        msg = (
+            f"💰 ВАША ПОСЛЕДНЯЯ ЗП\n\n"
+            f"📅 Дата: {date}\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💵 Ставка: {int(stavka)}\n"
+            f"📊 3% ЛМ: {int(lm_3)}\n"
+            f"📊 5%: {int(percent_5)}\n"
+            f"🎉 Промо: {int(promo)}\n"
+            f"🍽 CRZ: {int(crz)}\n"
+            f"🥂 Cons: {int(cons)}\n"
+            f"💸 Чаевые: {int(tips)}\n"
+        )
+        
+        if fines:
+            msg += f"⚠️ Штрафы: {int(fines)}\n"
+        
+        msg += (
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 ИТОГО выплат: {int(total_shift)}\n"
+            f"💵 Получила на смене: {int(to_pay or 0)}\n"
+            f"📋 Долг БН: {int(debt or 0)}\n"
+            f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+        )
+        
+        await query.edit_message_text(msg)
+    
+    elif query.data == 'emp_salary_date':
+        # Запрос даты для ЗП
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        await query.edit_message_text(
+            "📆 ЗП ЗА ДАТУ\n\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"📅 Введите дату (формат: 30,10 или 28,12,25):"
+        )
+        state.mode = 'employee_awaiting_date'
+    
+    elif query.data == 'emp_salary_period':
+        # Запрос периода для ЗП
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        await query.edit_message_text(
+            "📊 ЗП ЗА ПЕРИОД\n\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"📅 Введите период (формат: 3,10-5,11):"
+        )
+        state.mode = 'employee_awaiting_period'
+    
+    elif query.data == 'emp_salary_cancel':
+        # Отмена
+        await query.edit_message_text("❌ Отменено")
+        state.mode = None
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
