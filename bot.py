@@ -845,48 +845,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Обработка ввода даты для ЗП
         if state.mode == 'employee_awaiting_date':
-            # Парсим дату
-            try:
-                from datetime import datetime
-                # Формат: ДД,ММ или ДД.ММ
-                date_str = text.replace(',', '.').strip()
-                parts = date_str.split('.')
-                
-                if len(parts) != 2:
-                    raise ValueError
-                
-                day = int(parts[0])
-                month = int(parts[1])
-                year = datetime.now().year
-                
-                date_obj = datetime(year, month, day)
-                date_formatted = date_obj.strftime('%Y-%m-%d')
-                
-            except:
+            # Парсим дату используя parse_short_date (поддерживает год)
+            date_str_input = text.strip()  # Сохраняем для отображения
+            success, date_formatted, error = parse_short_date(text)
+            if not success:
                 await update.message.reply_text(
-                    "❌ Неверный формат даты\n\n"
-                    "Используйте: ДД,ММ или ДД.ММ\n"
-                    "Пример: 14,12 или 14.12"
+                    f"❌ {error}\n\n"
+                    "Используйте формат:\n"
+                    "• ДД,ММ или ДД.ММ (текущий год)\n"
+                    "• ДД,ММ,ГГ или ДД.ММ.ГГ (с указанием года)\n\n"
+                    "Примеры:\n"
+                    "• 14,12 или 14.12\n"
+                    "• 12,12,25 или 12.12.25"
                 )
                 return
             
-            # Получаем ЗП за эту дату
+            # Получаем ЗП за эту дату (поиск по всем клубам, так как сотрудник может быть в обоих)
             conn = db.get_connection()
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+                SELECT date, club, stavka, lm_3, percent_5, promo, crz, cons, tips, 
                        fines, total_shift, debt, debt_nal, to_pay
                 FROM payments
-                WHERE club = ? AND code = ? AND date = ?
-            """, (state.employee_club, state.employee_code, date_formatted))
+                WHERE code = ? AND date = ?
+                ORDER BY club
+            """, (state.employee_code, date_formatted))
             
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
             conn.close()
             
-            if not row:
+            if not rows:
                 await update.message.reply_text(
-                    f"❌ ЗП за {date_str} не найдена\n\n"
+                    f"❌ ЗП за {date_str_input} не найдена\n\n"
                     f"Возможно:\n"
                     f"• В этот день не было смены\n"
                     f"• Файл ещё не загружен\n"
@@ -895,36 +886,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 state.mode = None
                 return
             
-            date, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+            # Обрабатываем все записи (может быть несколько клубов)
+            for row in rows:
+                date, club, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+                
+                vychet_10 = round(debt * 0.1) if debt else 0
+                k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+                
+                msg = (
+                    f"💰 ЗП ЗА {date_str_input}\n\n"
+                    f"🏢 Клуб: {club}\n"
+                    f"📅 Дата: {date}\n"
+                    f"💼 Код: {state.employee_code}\n"
+                    f"👤 {state.employee_name}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"💵 Ставка: {int(stavka)}\n"
+                    f"📊 3% ЛМ: {int(lm_3)}\n"
+                    f"📊 5%: {int(percent_5)}\n"
+                    f"🎉 Промо: {int(promo)}\n"
+                    f"🍽 CRZ: {int(crz)}\n"
+                    f"🥂 Cons: {int(cons)}\n"
+                    f"💸 Чаевые: {int(tips)}\n"
+                )
+                
+                if fines:
+                    msg += f"⚠️ Штрафы: {int(fines)}\n"
+                
+                msg += (
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 ИТОГО: {int(total_shift)}\n"
+                    f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+                )
+                
+                await update.message.reply_text(msg)
             
-            vychet_10 = round(debt * 0.1) if debt else 0
-            k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
-            
-            msg = (
-                f"💰 ЗП ЗА {date_str}\n\n"
-                f"📅 {date}\n"
-                f"💼 {state.employee_code}\n"
-                f"👤 {state.employee_name}\n\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💵 Ставка: {int(stavka)}\n"
-                f"📊 3% ЛМ: {int(lm_3)}\n"
-                f"📊 5%: {int(percent_5)}\n"
-                f"🎉 Промо: {int(promo)}\n"
-                f"🍽 CRZ: {int(crz)}\n"
-                f"🥂 Cons: {int(cons)}\n"
-                f"💸 Чаевые: {int(tips)}\n"
-            )
-            
-            if fines:
-                msg += f"⚠️ Штрафы: {int(fines)}\n"
-            
-            msg += (
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 ИТОГО: {int(total_shift)}\n"
-                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
-            )
-            
-            await update.message.reply_text(msg)
             state.mode = None
             return
         
