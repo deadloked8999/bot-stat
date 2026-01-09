@@ -1824,6 +1824,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state.mode == 'awaiting_emp_tg':
         emp = state.edit_employee_selected
         
+        # Проверка что сотрудник выбран
+        if not emp or not state.edit_employees_club:
+            await update.message.reply_text("❌ Ошибка: данные сотрудника не найдены")
+            state.mode = None
+            return
+        
         if text_lower == 'удалить':
             new_tg = None
             action = "удалён (доступ отключён)"
@@ -1836,29 +1842,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         
         # Обновляем в БД
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        
-        from datetime import datetime
-        cursor.execute("""
-            UPDATE employees
-            SET telegram_user_id = ?, updated_at = ?
-            WHERE code = ? AND club = ?
-        """, (new_tg, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
-        
-        conn.commit()
-        conn.close()
-        
-        await update.message.reply_text(
-            f"✅ TELEGRAM ID {action.upper()}\n\n"
-            f"Код: {emp['code']}\n"
-            f"Имя: {emp['name']}\n"
-            f"Telegram ID: {new_tg or 'удалён'}"
-        )
-        
-        state.mode = None
-        state.edit_employee_selected = None
-        return
+        try:
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            from datetime import datetime
+            cursor.execute("""
+                UPDATE employees
+                SET telegram_user_id = ?, updated_at = ?
+                WHERE code = ? AND club = ?
+            """, (new_tg, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+            
+            conn.commit()
+            conn.close()
+            
+            await update.message.reply_text(
+                f"✅ TELEGRAM ID {action.upper()}\n\n"
+                f"Код: {emp['code']}\n"
+                f"Имя: {emp['name']}\n"
+                f"Telegram ID: {new_tg or 'удалён'}"
+            )
+            
+            state.mode = None
+            state.edit_employee_selected = None
+            return
+            
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ Ошибка при сохранении: {str(e)}\n\n"
+                f"Попробуйте снова или обратитесь к администратору"
+            )
+            return
     
     if state.mode == 'awaiting_emp_birth':
         emp = state.edit_employee_selected
