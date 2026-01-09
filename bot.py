@@ -332,27 +332,18 @@ db = Database()
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка команды /start и старт"""
     user_id = update.effective_user.id
-    print(f"DEBUG: /start от пользователя {user_id}")
     state = get_user_state(user_id)
     
     # Проверка: админ или сотрудник?
-    is_admin = db.is_admin(user_id)
-    print(f"DEBUG: is_admin={is_admin}")
-    
-    if not is_admin:
-        print("DEBUG: Пользователь не админ, проверяем сотрудника")
+    if not db.is_admin(user_id):
         employee = db.get_employee_by_telegram_id(user_id)
-        print(f"DEBUG: employee={employee}")
-        
         if employee and employee['is_active']:
             # Сотрудник - показываем персональное меню
-            print("DEBUG: Пользователь - активный сотрудник")
             state.employee_mode = True
             state.employee_code = employee['code']
             state.employee_club = employee['club']
             state.employee_name = employee['full_name'] or employee['code']
             
-            print("DEBUG: Отправляем приветствие сотруднику")
             await update.message.reply_text(
                 f"👋 Привет, {state.employee_name}!\n\n"
                 f"🏢 Клуб: {state.employee_club}\n"
@@ -360,16 +351,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Используйте кнопки меню:",
                 reply_markup=get_employee_menu_keyboard()
             )
-            print("DEBUG: Приветствие отправлено")
             return
         else:
             # Не админ и не сотрудник - игнорируем
-            print(f"DEBUG: Пользователь {user_id} не админ и не сотрудник - игнорируем (return без ответа)")
-            await update.message.reply_text(
-                "❌ Доступ запрещён\n\n"
-                "Вы не являетесь администратором или сотрудником.\n"
-                "Обратитесь к администратору для получения доступа."
-            )
             return
     
     # Блокируем /start для ограниченного доступа
