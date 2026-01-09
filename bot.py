@@ -5,7 +5,7 @@ import os
 import re
 import uuid
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, List
 from openpyxl import Workbook
 from difflib import SequenceMatcher
@@ -234,6 +234,226 @@ def get_employee_menu_keyboard():
         ['❌ Выход']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def get_employee_history_months_keyboard(employee_code: str):
+    """
+    Генерация инлайн-клавиатуры с месяцами для истории выплат сотрудника
+    
+    Args:
+        employee_code: код сотрудника
+        
+    Returns:
+        InlineKeyboardMarkup с кнопками месяцев
+    """
+    # Словарь для перевода месяцев
+    month_names = {
+        1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
+        5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
+        9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь'
+    }
+    
+    # Получаем уникальные месяцы из БД
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT DISTINCT strftime('%Y-%m', date) as month 
+        FROM payments 
+        WHERE code = ? 
+        ORDER BY month DESC
+    """, (employee_code,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        return None
+    
+    # Формируем кнопки
+    keyboard = []
+    
+    for row in rows:
+        month_str = row[0]  # 'YYYY-MM'
+        year, month = map(int, month_str.split('-'))
+        month_name = month_names[month]
+        button_text = f"{month_name} {year}"
+        
+        # По 2 кнопки в ряд
+        if len(keyboard) == 0 or len(keyboard[-1]) == 2:
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f'emp_history_month_{month_str}')])
+        else:
+            keyboard[-1].append(InlineKeyboardButton(button_text, callback_data=f'emp_history_month_{month_str}'))
+    
+    # Добавляем кнопку "Отмена"
+    keyboard.append([InlineKeyboardButton("◀️ Отмена", callback_data='emp_history_cancel')])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_employee_history_weeks_keyboard(employee_code: str, month: str):
+    """
+    Генерация инлайн-клавиатуры с неделями для истории выплат сотрудника
+    
+    Args:
+        employee_code: код сотрудника
+        month: месяц в формате 'YYYY-MM' (например '2025-12')
+        
+    Returns:
+        InlineKeyboardMarkup с кнопками недель
+    """
+    from collections import defaultdict
+    
+    # Словарь для коротких названий месяцев (для отображения в кнопках)
+    month_short = {
+        1: 'янв', 2: 'фев', 3: 'мар', 4: 'апр',
+        5: 'май', 6: 'июн', 7: 'июл', 8: 'авг',
+        9: 'сен', 10: 'окт', 11: 'ноя', 12: 'дек'
+    }
+    
+    # Получаем все даты из payments для этого кода и месяца
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT DISTINCT date 
+        FROM payments 
+        WHERE code = ? AND strftime('%Y-%m', date) = ?
+        ORDER BY date
+    """, (employee_code, month))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        return None
+    
+    # Преобразуем даты в datetime объекты
+    dates = [datetime.strptime(row[0], '%Y-%m-%d') for row in rows]
+    
+    # Группируем по неделям (ВС-СБ)
+    weeks_dict = defaultdict(list)  # key: (week_start, week_end), value: [даты]
+    
+    for date_obj in dates:
+        # Определяем воскресенье недели (начало недели ВС-СБ)
+        weekday = date_obj.weekday()  # 0=понедельник, 6=воскресенье
+        
+        if weekday == 6:  # Воскресенье
+            week_start = date_obj
+        else:
+            # Отнимаем (weekday + 1) дней, чтобы получить воскресенье
+            week_start = date_obj - timedelta(days=weekday + 1)
+        
+        # Суббота (конец недели)
+        week_end = week_start + timedelta(days=6)
+        
+        week_key = (week_start.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d'))
+        weeks_dict[week_key].append(date_obj)
+    
+    # Сортируем недели по дате начала
+    sorted_weeks = sorted(weeks_dict.items(), key=lambda x: x[0][0])
+    
+    # Формируем кнопки
+    keyboard = []
+    
+    for (week_start_str, week_end_str), week_dates in sorted_weeks:
+        # Подсчитываем количество смен (уникальных дат)
+        shifts_count = len(week_dates)
+        
+        # Парсим даты начала и конца недели
+        start_date = datetime.strptime(week_start_str, '%Y-%m-%d')
+        end_date = datetime.strptime(week_end_str, '%Y-%m-%d')
+        
+        # Формируем текст кнопки
+        start_day = start_date.day  # без ведущего нуля
+        end_day = end_date.day  # без ведущего нуля
+        start_month = month_short[start_date.month]
+        end_month = month_short[end_date.month]
+        
+        # Правильное склонение слова "смена"
+        if shifts_count == 1:
+            shifts_word = "смена"
+        elif 2 <= shifts_count <= 4:
+            shifts_word = "смены"
+        else:
+            shifts_word = "смен"
+        
+        if start_date.month == end_date.month:
+            # Вся неделя внутри одного месяца: "1-7 дек (3 смены)"
+            button_text = f"{start_day}-{end_day} {start_month} ({shifts_count} {shifts_word})"
+        else:
+            # Неделя пересекает месяцы: "28 дек - 3 янв (4 смены)"
+            button_text = f"{start_day} {start_month} - {end_day} {end_month} ({shifts_count} {shifts_word})"
+        
+        # По 1 кнопке в ряд
+        callback_data = f'emp_history_week_{week_start_str}_{week_end_str}'
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+    
+    # Добавляем кнопку "Назад к месяцам"
+    keyboard.append([InlineKeyboardButton("◀️ Назад к месяцам", callback_data='emp_history_back_months')])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_employee_history_dates_keyboard(employee_code: str, week_start: str, week_end: str, month: str):
+    """
+    Генерация инлайн-клавиатуры с датами в неделе для истории выплат сотрудника
+    
+    Args:
+        employee_code: код сотрудника
+        week_start: дата начала недели в формате 'YYYY-MM-DD'
+        week_end: дата окончания недели в формате 'YYYY-MM-DD'
+        month: месяц в формате 'YYYY-MM' (для кнопки "Назад")
+        
+    Returns:
+        InlineKeyboardMarkup с кнопками дат
+    """
+    # Словарь для коротких названий месяцев (для отображения в кнопках)
+    month_short = {
+        1: 'янв', 2: 'фев', 3: 'мар', 4: 'апр',
+        5: 'май', 6: 'июн', 7: 'июл', 8: 'авг',
+        9: 'сен', 10: 'окт', 11: 'ноя', 12: 'дек'
+    }
+    
+    # Получаем даты из payments для этого кода в диапазоне недели
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT DISTINCT date 
+        FROM payments 
+        WHERE code = ? AND date BETWEEN ? AND ?
+        ORDER BY date
+    """, (employee_code, week_start, week_end))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        return None
+    
+    # Формируем кнопки
+    keyboard = []
+    
+    for row in rows:
+        date_str = row[0]  # 'YYYY-MM-DD'
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        
+        # Формат кнопки: "8 дек", "12 янв" (день без ведущего нуля + короткий месяц)
+        day = date_obj.day  # без ведущего нуля
+        month_name = month_short[date_obj.month]
+        button_text = f"{day} {month_name}"
+        
+        # По 3 кнопки в ряд
+        if len(keyboard) == 0 or len(keyboard[-1]) == 3:
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f'emp_history_date_{date_str}')])
+        else:
+            keyboard[-1].append(InlineKeyboardButton(button_text, callback_data=f'emp_history_date_{date_str}'))
+    
+    # Добавляем кнопку "Назад к неделям"
+    keyboard.append([InlineKeyboardButton("◀️ Назад к неделям", callback_data=f'emp_history_back_weeks_{month}')])
+    
+    return InlineKeyboardMarkup(keyboard)
 
 
 def get_club_report_keyboard():
@@ -814,33 +1034,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Команда "История выплат"
         if text_lower in ['история выплат', '💵 история выплат']:
-            conn = db.get_connection()
-            cursor = conn.cursor()
+            # Генерируем инлайн-клавиатуру с месяцами
+            keyboard = get_employee_history_months_keyboard(state.employee_code)
             
-            cursor.execute("""
-                SELECT date, total_shift, to_pay
-                FROM payments
-                WHERE club = ? AND code = ?
-                ORDER BY date DESC
-                LIMIT 10
-            """, (state.employee_club, state.employee_code))
-            
-            rows = cursor.fetchall()
-            conn.close()
-            
-            if not rows:
-                await update.message.reply_text("❌ История выплат пуста")
+            if not keyboard:
+                await update.message.reply_text(
+                    "❌ История выплат пуста\n\n"
+                    "Данные о выплатах не найдены."
+                )
                 return
             
-            msg = f"💵 ИСТОРИЯ ВЫПЛАТ\n\n"
-            msg += f"💼 {state.employee_code} - {state.employee_name}\n\n"
-            
-            for date, total, paid in rows:
-                msg += f"📅 {date}: {int(total)} ₽\n"
-            
-            msg += f"\n📊 Всего записей: {len(rows)}"
-            
-            await update.message.reply_text(msg)
+            await update.message.reply_text(
+                f"💵 ИСТОРИЯ ВЫПЛАТ\n\n"
+                f"💼 Код: {state.employee_code}\n"
+                f"👤 {state.employee_name}\n\n"
+                f"📅 Выберите месяц:",
+                reply_markup=keyboard
+            )
             return
         
         # Обработка ввода даты для ЗП
@@ -7086,6 +7296,251 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'emp_salary_cancel':
         # Отмена
+        await query.edit_message_text("❌ Отменено")
+        state.mode = None
+    
+    # === ОБРАБОТКА "ИСТОРИЯ ВЫПЛАТ" ДЛЯ СОТРУДНИКОВ ===
+    elif query.data.startswith('emp_history_month_'):
+        # Показ недель месяца
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        # Парсим month из callback_data (формат: emp_history_month_2025-12)
+        month = query.data.replace('emp_history_month_', '')
+        
+        # Вызываем функцию генерации клавиатуры
+        keyboard = get_employee_history_weeks_keyboard(state.employee_code, month)
+        
+        if not keyboard:
+            await query.edit_message_text(
+                f"❌ Данных за этот месяц нет\n\n"
+                f"Месяц: {month}"
+            )
+            return
+        
+        # Форматируем заголовок месяца
+        try:
+            year, month_num = month.split('-')
+            month_names = {
+                1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
+                5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
+                9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь'
+            }
+            month_name = month_names[int(month_num)]
+            header = f"📅 {month_name} {year}"
+        except:
+            header = f"📅 МЕСЯЦ {month}"
+        
+        await query.edit_message_text(
+            f"{header}\n\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"Выберите неделю:",
+            reply_markup=keyboard
+        )
+    
+    elif query.data.startswith('emp_history_week_'):
+        # Показ дат недели
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        # Парсим week_start и week_end из callback_data (формат: emp_history_week_2025-12-07_2025-12-13)
+        parts = query.data.replace('emp_history_week_', '').split('_')
+        if len(parts) != 2:
+            await query.answer("❌ Ошибка формата данных", show_alert=True)
+            return
+        
+        week_start = parts[0]
+        week_end = parts[1]
+        
+        # Извлекаем month из week_start (первые 7 символов: 'YYYY-MM')
+        month = week_start[:7]
+        
+        # Вызываем функцию генерации клавиатуры
+        keyboard = get_employee_history_dates_keyboard(state.employee_code, week_start, week_end, month)
+        
+        if not keyboard:
+            await query.edit_message_text(
+                f"❌ Данных за эту неделю нет\n\n"
+                f"Неделя: {week_start} - {week_end}"
+            )
+            return
+        
+        # Форматируем заголовок недели
+        try:
+            start_date = datetime.strptime(week_start, '%Y-%m-%d')
+            end_date = datetime.strptime(week_end, '%Y-%m-%d')
+            
+            month_short = {
+                1: 'янв', 2: 'фев', 3: 'мар', 4: 'апр',
+                5: 'май', 6: 'июн', 7: 'июл', 8: 'авг',
+                9: 'сен', 10: 'окт', 11: 'ноя', 12: 'дек'
+            }
+            
+            start_day = start_date.day
+            end_day = end_date.day
+            start_month = month_short[start_date.month]
+            end_month = month_short[end_date.month]
+            
+            if start_date.month == end_date.month:
+                header = f"📅 НЕДЕЛЯ: {start_day}-{end_day} {start_month}"
+            else:
+                header = f"📅 НЕДЕЛЯ: {start_day} {start_month} - {end_day} {end_month}"
+        except:
+            header = f"📅 НЕДЕЛЯ: {week_start} - {week_end}"
+        
+        await query.edit_message_text(
+            f"{header}\n\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"Выберите дату:",
+            reply_markup=keyboard
+        )
+    
+    elif query.data.startswith('emp_history_date_'):
+        # Показ детализации ЗП за дату
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        # Парсим date из callback_data (формат: emp_history_date_2025-12-12)
+        date_str = query.data.replace('emp_history_date_', '')
+        
+        # Получаем данные из payments для этой даты (БЕЗ фильтра по club!)
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT date, club, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+                   fines, total_shift, debt, debt_nal, to_pay
+            FROM payments
+            WHERE code = ? AND date = ?
+            ORDER BY club
+        """, (state.employee_code, date_str))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Закрываем "часики"
+        await query.answer()
+        
+        if not rows:
+            await query.edit_message_text(
+                f"❌ Данных о ЗП за эту дату нет\n\n"
+                f"Дата: {date_str}"
+            )
+            return
+        
+        # Обрабатываем все записи (может быть несколько клубов)
+        for idx, row in enumerate(rows):
+            date, club, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+            
+            # Пересчитываем К выплате
+            vychet_10 = round(debt * 0.1) if debt else 0
+            k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+            
+            msg = (
+                f"💰 ЗП ЗА {date_str}\n\n"
+                f"🏢 Клуб: {club}\n"
+                f"📅 Дата: {date}\n"
+                f"💼 Код: {state.employee_code}\n"
+                f"👤 {state.employee_name}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💵 Ставка: {int(stavka)}\n"
+                f"📊 3% ЛМ: {int(lm_3)}\n"
+                f"📊 5%: {int(percent_5)}\n"
+                f"🎉 Промо: {int(promo)}\n"
+                f"🍽 CRZ: {int(crz)}\n"
+                f"🥂 Cons: {int(cons)}\n"
+                f"💸 Чаевые: {int(tips)}\n"
+            )
+            
+            if fines:
+                msg += f"⚠️ Штрафы: {int(fines)}\n"
+            
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 ИТОГО выплат: {int(total_shift)}\n"
+                f"💵 Получила на смене: {int(to_pay or 0)}\n"
+                f"📋 Долг БН: {int(debt or 0)}\n"
+                f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+            )
+            
+            # Первую запись редактируем в текущем сообщении, остальные отправляем отдельными
+            if idx == 0:
+                await query.edit_message_text(msg)
+            else:
+                await query.message.reply_text(msg)
+    
+    elif query.data == 'emp_history_back_months':
+        # Возврат к месяцам
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        keyboard = get_employee_history_months_keyboard(state.employee_code)
+        
+        if not keyboard:
+            await query.edit_message_text("❌ История выплат пуста")
+            return
+        
+        await query.edit_message_text(
+            f"💵 ИСТОРИЯ ВЫПЛАТ\n\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"📅 Выберите месяц:",
+            reply_markup=keyboard
+        )
+    
+    elif query.data.startswith('emp_history_back_weeks_'):
+        # Возврат к неделям
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
+        # Парсим month из callback_data (формат: emp_history_back_weeks_2025-12)
+        month = query.data.replace('emp_history_back_weeks_', '')
+        
+        keyboard = get_employee_history_weeks_keyboard(state.employee_code, month)
+        
+        if not keyboard:
+            await query.edit_message_text(
+                f"❌ Данных за этот месяц нет\n\n"
+                f"Месяц: {month}"
+            )
+            return
+        
+        # Форматируем заголовок месяца
+        try:
+            year, month_num = month.split('-')
+            month_names = {
+                1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
+                5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
+                9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь'
+            }
+            month_name = month_names[int(month_num)]
+            header = f"📅 {month_name} {year}"
+        except:
+            header = f"📅 МЕСЯЦ {month}"
+        
+        await query.edit_message_text(
+            f"{header}\n\n"
+            f"💼 Код: {state.employee_code}\n"
+            f"👤 {state.employee_name}\n\n"
+            f"Выберите неделю:",
+            reply_markup=keyboard
+        )
+    
+    elif query.data == 'emp_history_cancel':
+        # Отмена
+        if not state.employee_mode:
+            await query.answer("❌ Доступ только для сотрудников", show_alert=True)
+            return
+        
         await query.edit_message_text("❌ Отменено")
         state.mode = None
 
