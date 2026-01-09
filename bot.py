@@ -930,73 +930,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Сохраняем оригинальный текст для отображения
-            period_display = text.strip()
-            
-            # Получаем все ЗП за период
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
-                       fines, total_shift, debt, debt_nal, to_pay
-                FROM payments
-                WHERE club = ? AND code = ? AND date BETWEEN ? AND ?
-                ORDER BY date
-            """, (state.employee_club, state.employee_code, date_from, date_to))
-            
-            rows = cursor.fetchall()
-            conn.close()
-            
-            if not rows:
-                await update.message.reply_text(
-                    f"❌ ЗП за период {period_display} не найдена"
-                )
-                state.mode = None
-                return
-            
-            # Суммируем
-            total_stavka = sum(r[1] for r in rows)
-            total_lm_3 = sum(r[2] for r in rows)
-            total_percent_5 = sum(r[3] for r in rows)
-            total_promo = sum(r[4] for r in rows)
-            total_crz = sum(r[5] for r in rows)
-            total_cons = sum(r[6] for r in rows)
-            total_tips = sum(r[7] for r in rows)
-            total_fines = sum(r[8] for r in rows)
-            total_shift = sum(r[9] for r in rows)
-            total_debt = sum(r[10] for r in rows)
-            total_debt_nal = sum(r[11] for r in rows)
-            
-            vychet_10 = round(total_debt * 0.1)
-            k_vyplate = round(total_debt_nal + total_debt - vychet_10)
-            
-            msg = (
-                f"💰 ЗП ЗА ПЕРИОД\n\n"
-                f"📅 {period_display}\n"
-                f"💼 {state.employee_code}\n"
-                f"👤 {state.employee_name}\n"
-                f"📊 Смен: {len(rows)}\n\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💵 Ставка: {int(total_stavka)}\n"
-                f"📊 3% ЛМ: {int(total_lm_3)}\n"
-                f"📊 5%: {int(total_percent_5)}\n"
-                f"🎉 Промо: {int(total_promo)}\n"
-                f"🍽 CRZ: {int(total_crz)}\n"
-                f"🥂 Cons: {int(total_cons)}\n"
-                f"💸 Чаевые: {int(total_tips)}\n"
-            )
-            
-            if total_fines:
-                msg += f"⚠️ Штрафы: {int(total_fines)}\n"
-            
-            msg += (
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 ИТОГО: {int(total_shift)}\n"
-                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
-            )
-            
-            await update.message.reply_text(msg)
+            # Генерируем Excel-файл (функция сама проверит наличие данных)
+            await generate_salary_excel_by_employee(update, state.employee_code, date_from, date_to)
             state.mode = None
             return
     
@@ -4840,7 +4775,8 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         'Принята', 'Уволена', 'Статус',
         'Ставка', '3% ЛМ', '5%', 'Промо',
         'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
-        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
+        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате',
+        'Самозанятость', 'К выплате (самозанятый)'
     ]
     
     for col, header in enumerate(headers, 1):
@@ -4939,6 +4875,19 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         
         status_icon = '✅' if is_active else '🗂️'
         
+        # Проверяем самозанятость
+        normalized_code = payment['code'].upper().strip()
+        is_self_employed = db.is_self_employed(normalized_code)
+        
+        # Рассчитываем "К выплате (самозанятый)" если самозанятый
+        # Формула: itog / 0.94 (где itog = total_shift)
+        if is_self_employed:
+            self_employed_payout = round(payment['total_shift'] / 0.94, 2)
+            self_employed_icon = '✓'
+        else:
+            self_employed_payout = ''
+            self_employed_icon = ''
+        
         # Записываем строку
         row_data = [
             date_short,
@@ -4960,14 +4909,19 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
             payment['debt'],
             vychet_10,
             payment['debt_nal'],
-            k_vyplate  # БЕЗ stylist_amount
+            k_vyplate,  # БЕЗ stylist_amount
+            self_employed_icon,  # Самозанятость
+            self_employed_payout  # К выплате (самозанятый)
         ]
         
         for col, value in enumerate(row_data, 1):
             cell = ws.cell(row=row_num, column=col, value=value)
             cell.border = border
             if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
-                cell.alignment = Alignment(horizontal='right', vertical='center')
+                if col == 21:  # Колонка "Самозанятость" - по центру
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
             else:
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         
@@ -5007,7 +4961,9 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         totals['debt'],
         vychet_10_total,
         totals['debt_nal'],
-        round(totals['final_pay'])  # Округление до целого
+        round(totals['final_pay']),  # Округление до целого
+        '',  # Самозанятость (пусто для итогов)
+        ''   # К выплате (самозанятый) (пусто для итогов)
     ]
     
     for col, value in enumerate(itogo_data, 1):
@@ -5015,7 +4971,10 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         cell.font = Font(bold=True)
         cell.border = border
         if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
-            cell.alignment = Alignment(horizontal='right', vertical='center')
+            if col == 21:  # Колонка "Самозанятость" - по центру
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='right', vertical='center')
         else:
             cell.alignment = Alignment(horizontal='center', vertical='center')
     
