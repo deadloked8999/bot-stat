@@ -916,36 +916,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Обработка ввода периода для ЗП
         if state.mode == 'employee_awaiting_period':
-            # Парсим период
-            try:
-                from datetime import datetime
-                # Формат: ДД,ММ-ДД,ММ
-                period = text.replace('.', ',').strip()
-                parts = period.split('-')
-                
-                if len(parts) != 2:
-                    raise ValueError
-                
-                # Дата от
-                date_from_parts = parts[0].split(',')
-                day_from = int(date_from_parts[0])
-                month_from = int(date_from_parts[1])
-                year = datetime.now().year
-                date_from = datetime(year, month_from, day_from).strftime('%Y-%m-%d')
-                
-                # Дата до
-                date_to_parts = parts[1].split(',')
-                day_to = int(date_to_parts[0])
-                month_to = int(date_to_parts[1])
-                date_to = datetime(year, month_to, day_to).strftime('%Y-%m-%d')
-                
-            except:
+            # Парсим период используя parse_date_range (поддерживает год)
+            success, date_from, date_to, error = parse_date_range(text)
+            if not success:
                 await update.message.reply_text(
-                    "❌ Неверный формат периода\n\n"
-                    "Используйте: ДД,ММ-ДД,ММ\n"
-                    "Пример: 14,12-20,12"
+                    f"❌ {error}\n\n"
+                    "Используйте формат:\n"
+                    "• ДД,ММ-ДД,ММ (текущий год)\n"
+                    "• ДД,ММ,ГГ-ДД,ММ,ГГ (с указанием года)\n\n"
+                    "Примеры:\n"
+                    "• 14,12-20,12\n"
+                    "• 12,12,25-20,12,25"
                 )
                 return
+            
+            # Сохраняем оригинальный текст для отображения
+            period_display = text.strip()
             
             # Получаем все ЗП за период
             conn = db.get_connection()
@@ -964,7 +950,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if not rows:
                 await update.message.reply_text(
-                    f"❌ ЗП за период {parts[0]}-{parts[1]} не найдена"
+                    f"❌ ЗП за период {period_display} не найдена"
                 )
                 state.mode = None
                 return
@@ -987,7 +973,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             msg = (
                 f"💰 ЗП ЗА ПЕРИОД\n\n"
-                f"📅 {parts[0]} - {parts[1]}\n"
+                f"📅 {period_display}\n"
                 f"💼 {state.employee_code}\n"
                 f"👤 {state.employee_name}\n"
                 f"📊 Смен: {len(rows)}\n\n"
@@ -7028,7 +7014,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "📊 ЗП ЗА ПЕРИОД\n\n"
             f"💼 Код: {state.employee_code}\n"
             f"👤 {state.employee_name}\n\n"
-            f"📅 Введите период (формат: 3,10-5,11):"
+            f"📅 Введите период:\n"
+            f"• ДД,ММ-ДД,ММ (текущий год)\n"
+            f"• ДД,ММ,ГГ-ДД,ММ,ГГ (с годом)\n\n"
+            f"Примеры: 3,10-5,11 или 12,12,25-20,12,25"
         )
         state.mode = 'employee_awaiting_period'
     
