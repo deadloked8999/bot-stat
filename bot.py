@@ -428,6 +428,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"DEBUG: Получена команда: '{text}', mode={state.mode}, limited_access={state.limited_access}")
     
+    # Проверка: если сотрудник был авторизован, но доступ удален - сбрасываем сессию
+    if state.employee_mode:
+        employee = db.get_employee_by_telegram_id(user_id)
+        if not employee or not employee.get('is_active'):
+            # Доступ удален - сбрасываем сессию
+            state.__init__()
+            await update.message.reply_text(
+                "🔒 Доступ отключён\n\n"
+                "Ваш доступ к боту был удалён администратором.\n"
+                "Для получения доступа обратитесь к администратору.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+    
     # Проверка авторизации
     if not db.is_admin(user_id) and not state.employee_mode:
         # Специальный код для limited_access
