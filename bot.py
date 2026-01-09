@@ -1822,10 +1822,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if state.mode == 'awaiting_emp_tg':
+        print(f"DEBUG: awaiting_emp_tg - получен текст: {text}")
         emp = state.edit_employee_selected
+        print(f"DEBUG: emp={emp}, club={state.edit_employees_club}")
         
         # Проверка что сотрудник выбран
         if not emp or not state.edit_employees_club:
+            print("DEBUG: Ошибка - данные сотрудника не найдены")
             await update.message.reply_text("❌ Ошибка: данные сотрудника не найдены")
             state.mode = None
             return
@@ -1833,41 +1836,66 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text_lower == 'удалить':
             new_tg = None
             action = "удалён (доступ отключён)"
+            print(f"DEBUG: Удаление TG ID")
         else:
             try:
                 new_tg = int(text.strip())
                 action = "изменён (доступ активен)"
-            except:
+                print(f"DEBUG: Получен TG ID: {new_tg}")
+            except Exception as e:
+                print(f"DEBUG: Ошибка парсинга TG ID: {e}")
                 await update.message.reply_text("❌ Telegram ID должен быть числом")
                 return
         
         # Обновляем в БД
         try:
+            print("DEBUG: Начинаем подключение к БД")
             conn = db.get_connection()
             cursor = conn.cursor()
+            print("DEBUG: Подключение к БД установлено")
             
             from datetime import datetime
+            update_data = (new_tg, datetime.now().isoformat(), emp['code'], state.edit_employees_club)
+            print(f"DEBUG: Параметры UPDATE: {update_data}")
+            
+            print("DEBUG: Начинаем UPDATE")
             cursor.execute("""
                 UPDATE employees
                 SET telegram_user_id = ?, updated_at = ?
                 WHERE code = ? AND club = ?
-            """, (new_tg, datetime.now().isoformat(), emp['code'], state.edit_employees_club))
+            """, update_data)
+            print(f"DEBUG: UPDATE выполнен, затронуто строк: {cursor.rowcount}")
             
+            print("DEBUG: Начинаем COMMIT")
             conn.commit()
-            conn.close()
+            print("DEBUG: COMMIT выполнен")
             
+            print("DEBUG: Закрываем соединение")
+            conn.close()
+            print("DEBUG: Соединение закрыто")
+            
+            print("DEBUG: Отправляем ответ пользователю")
             await update.message.reply_text(
                 f"✅ TELEGRAM ID {action.upper()}\n\n"
                 f"Код: {emp['code']}\n"
                 f"Имя: {emp['name']}\n"
                 f"Telegram ID: {new_tg or 'удалён'}"
             )
+            print("DEBUG: Ответ отправлен")
             
             state.mode = None
             state.edit_employee_selected = None
+            print("DEBUG: Состояние очищено")
             return
             
         except Exception as e:
+            print(f"DEBUG: ОШИБКА: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                conn.close()
+            except:
+                pass
             await update.message.reply_text(
                 f"❌ Ошибка при сохранении: {str(e)}\n\n"
                 f"Попробуйте снова или обратитесь к администратору"
