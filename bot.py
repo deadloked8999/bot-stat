@@ -555,8 +555,13 @@ async def send_salary_notifications(bot, uploaded_payments: List[Dict], club: st
         club: клуб
         date: дата
     """
+    print(f"DEBUG: send_salary_notifications called: club={club}, date={date}, payments_count={len(uploaded_payments)}")
+    
     # Словарь для отслеживания уже отправленных уведомлений (code, date, club)
     sent_notifications = set()
+    notifications_sent = 0
+    notifications_skipped = 0
+    notifications_failed = 0
     
     for payment in uploaded_payments:
         code = payment['code']
@@ -568,78 +573,94 @@ async def send_salary_notifications(bot, uploaded_payments: List[Dict], club: st
         
         sent_notifications.add(key)
         
-        # Получаем telegram_user_id из employees
+        # Получаем telegram_user_id из employees (ищем по всем клубам для этого кода)
         conn = db.get_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT telegram_user_id, full_name
+            SELECT telegram_user_id, full_name, club
             FROM employees
-            WHERE code = ? AND club = ? AND telegram_user_id IS NOT NULL AND is_active = 1
-        """, (code, club))
+            WHERE code = ? AND telegram_user_id IS NOT NULL AND is_active = 1
+        """, (code,))
         
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
         conn.close()
         
-        if not row:
+        if not rows:
+            print(f"DEBUG: No employee found for code={code} (no telegram_user_id or inactive)")
+            notifications_skipped += 1
             continue  # Нет telegram_user_id или сотрудник неактивен
         
-        telegram_user_id, full_name = row
-        
-        # Формируем сообщение в формате "Последняя ЗП"
-        stavka = payment.get('stavka', 0)
-        lm_3 = payment.get('lm_3', 0)
-        percent_5 = payment.get('percent_5', 0)
-        promo = payment.get('promo', 0)
-        crz = payment.get('crz', 0)
-        cons = payment.get('cons', 0)
-        tips = payment.get('tips', 0)
-        fines = payment.get('fines', 0)
-        total_shift = payment.get('total_shift', 0)
-        debt = payment.get('debt', 0)
-        debt_nal = payment.get('debt_nal', 0)
-        to_pay = payment.get('to_pay', 0)
-        
-        # Пересчитываем К выплате
-        vychet_10 = round(debt * 0.1) if debt else 0
-        k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
-        
-        msg = (
-            f"💰 ВАША ЗП НАЧИСЛЕНА\n\n"
-            f"📅 Дата: {date}\n"
-            f"💼 Код: {code}\n"
-            f"👤 {full_name or code}\n"
-            f"🏢 Клуб: {club}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💵 Ставка: {int(stavka)}\n"
-            f"📊 3% ЛМ: {int(lm_3)}\n"
-            f"📊 5%: {int(percent_5)}\n"
-            f"🎉 Промо: {int(promo)}\n"
-            f"🍽 CRZ: {int(crz)}\n"
-            f"🥂 Cons: {int(cons)}\n"
-            f"💸 Чаевые: {int(tips)}\n"
-        )
-        
-        if fines:
-            msg += f"⚠️ Штрафы: {int(fines)}\n"
-        
-        msg += (
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 ИТОГО выплат: {int(total_shift)}\n"
-            f"💵 Получила на смене: {int(to_pay or 0)}\n"
-            f"📋 Долг БН: {int(debt or 0)}\n"
-            f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
-        )
-        
-        # Отправляем уведомление (игнорируем ошибки)
-        try:
-            await bot.send_message(chat_id=telegram_user_id, text=msg)
-        except Exception as e:
-            # Игнорируем ошибки (пользователь заблокировал бота, удалил аккаунт и т.д.)
-            print(f"DEBUG: Failed to send salary notification to {telegram_user_id} ({code}): {e}")
-            pass
+        # Отправляем уведомление для каждой найденной записи (если сотрудник в нескольких клубах)
+        for row in rows:
+            telegram_user_id, full_name, employee_club = row
+            
+            # Проверяем, что сотрудник действительно работает в этом клубе
+            if employee_club != club:
+                print(f"DEBUG: Employee {code} ({full_name}) in club {employee_club}, but payment is for {club} - skipping")
+                continue
+            
+            print(f"DEBUG: Sending notification to {code} ({full_name}), TG_ID: {telegram_user_id}, club: {club}, date: {date}")
+            
+            # Формируем сообщение в формате "Последняя ЗП"
+            stavka = payment.get('stavka', 0)
+            lm_3 = payment.get('lm_3', 0)
+            percent_5 = payment.get('percent_5', 0)
+            promo = payment.get('promo', 0)
+            crz = payment.get('crz', 0)
+            cons = payment.get('cons', 0)
+            tips = payment.get('tips', 0)
+            fines = payment.get('fines', 0)
+            total_shift = payment.get('total_shift', 0)
+            debt = payment.get('debt', 0)
+            debt_nal = payment.get('debt_nal', 0)
+            to_pay = payment.get('to_pay', 0)
+            
+            # Пересчитываем К выплате
+            vychet_10 = round(debt * 0.1) if debt else 0
+            k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+            
+            msg = (
+                f"💰 ВАША ЗП НАЧИСЛЕНА\n\n"
+                f"📅 Дата: {date}\n"
+                f"💼 Код: {code}\n"
+                f"👤 {full_name or code}\n"
+                f"🏢 Клуб: {club}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💵 Ставка: {int(stavka)}\n"
+                f"📊 3% ЛМ: {int(lm_3)}\n"
+                f"📊 5%: {int(percent_5)}\n"
+                f"🎉 Промо: {int(promo)}\n"
+                f"🍽 CRZ: {int(crz)}\n"
+                f"🥂 Cons: {int(cons)}\n"
+                f"💸 Чаевые: {int(tips)}\n"
+            )
+            
+            if fines:
+                msg += f"⚠️ Штрафы: {int(fines)}\n"
+            
+            msg += (
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 ИТОГО выплат: {int(total_shift)}\n"
+                f"💵 Получила на смене: {int(to_pay or 0)}\n"
+                f"📋 Долг БН: {int(debt or 0)}\n"
+                f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+            )
+            
+            # Отправляем уведомление (игнорируем ошибки)
+            try:
+                await bot.send_message(chat_id=telegram_user_id, text=msg)
+                print(f"DEBUG: Successfully sent notification to {telegram_user_id} ({code})")
+                notifications_sent += 1
+            except Exception as e:
+                # Игнорируем ошибки (пользователь заблокировал бота, удалил аккаунт и т.д.)
+                print(f"DEBUG: Failed to send salary notification to {telegram_user_id} ({code}): {e}")
+                notifications_failed += 1
+                pass
+    
+    print(f"DEBUG: Notifications summary - sent: {notifications_sent}, skipped: {notifications_skipped}, failed: {notifications_failed}")
 
 
 # Инициализация базы данных
@@ -7314,13 +7335,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT date, stavka, lm_3, percent_5, promo, crz, cons, tips, 
+            SELECT date, club, stavka, lm_3, percent_5, promo, crz, cons, tips, 
                    fines, total_shift, debt, debt_nal, to_pay
             FROM payments
-            WHERE club = ? AND code = ?
+            WHERE code = ?
             ORDER BY date DESC
             LIMIT 1
-        """, (state.employee_club, state.employee_code))
+        """, (state.employee_code,))
         
         row = cursor.fetchone()
         conn.close()
@@ -7332,7 +7353,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return
         
-        date, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
+        date, club, stavka, lm_3, percent_5, promo, crz, cons, tips, fines, total_shift, debt, debt_nal, to_pay = row
         
         # Пересчитываем К выплате
         vychet_10 = round(debt * 0.1) if debt else 0
@@ -7341,6 +7362,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         msg = (
             f"💰 ВАША ПОСЛЕДНЯЯ ЗП\n\n"
             f"📅 Дата: {date}\n"
+            f"🏢 Клуб: {club}\n"
             f"💼 Код: {state.employee_code}\n"
             f"👤 {state.employee_name}\n\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
