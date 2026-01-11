@@ -6628,13 +6628,23 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         # DEBUG: Проверяем что сохранилось
         db.debug_payments(state.payments_upload_club, state.payments_upload_date)
         
+        print(f"DEBUG: About to call send_salary_notifications with {len(state.payments_preview_data)} payments")
+        print(f"DEBUG: Club: {state.payments_upload_club}, Date: {state.payments_upload_date}")
+        
         # Отправляем уведомления сотрудникам о начисленной ЗП
-        await send_salary_notifications(
-            context.bot,
-            state.payments_preview_data,
-            state.payments_upload_club,
-            state.payments_upload_date
-        )
+        try:
+            await send_salary_notifications(
+                context.bot,
+                state.payments_preview_data,
+                state.payments_upload_club,
+                state.payments_upload_date
+            )
+            print(f"DEBUG: send_salary_notifications completed successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to send salary notifications: {e}")
+            import traceback
+            traceback.print_exc()
+            # Не прерываем сохранение, если уведомления не отправились
         
         await query.edit_message_text(
             f"✅ ДАННЫЕ СОХРАНЕНЫ!\n\n"

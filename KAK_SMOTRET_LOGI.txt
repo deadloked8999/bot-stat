@@ -1,0 +1,113 @@
+═══════════════════════════════════════════════════════════
+  КАК ПОСМОТРЕТЬ ЛОГИ БОТА
+═══════════════════════════════════════════════════════════
+
+📋 ЛОКАЛЬНО (на вашем компьютере):
+─────────────────────────────────────────────────────────
+
+1. ЗАПУСК БОТА С ЛОГАМИ:
+   
+   Windows (CMD):
+   > start_with_logs.bat
+   
+   Windows (PowerShell):
+   > .\start_with_logs.ps1
+   
+   Логи сохраняются в файл: bot_logs.txt
+
+2. ПРОСМОТР ЛОГОВ:
+   
+   Windows (CMD):
+   > view_logs.bat
+   
+   Windows (PowerShell):
+   > .\view_logs.ps1
+   
+   Или откройте файл bot_logs.txt в блокноте
+
+3. ПОИСК В ЛОГАХ:
+   
+   PowerShell:
+   > Get-Content bot_logs.txt | Select-String "DEBUG:"
+   > Get-Content bot_logs.txt | Select-String "send_salary_notifications"
+   > Get-Content bot_logs.txt | Select-String "Д30"
+
+   CMD:
+   > findstr "DEBUG:" bot_logs.txt
+   > findstr "send_salary_notifications" bot_logs.txt
+
+─────────────────────────────────────────────────────────
+
+📋 НА СЕРВЕРЕ (через SSH):
+─────────────────────────────────────────────────────────
+
+1. ПОДКЛЮЧЕНИЕ К СЕРВЕРУ:
+   ssh root@185.245.34.167
+
+2. ПРОСМОТР ЛОГОВ SYSTEMD:
+   
+   # Последние 100 строк логов
+   journalctl -u telegram-bot -n 100
+   
+   # Логи за сегодня
+   journalctl -u telegram-bot --since today
+   
+   # Логи за последний час
+   journalctl -u telegram-bot --since "1 hour ago"
+   
+   # Поиск по тексту
+   journalctl -u telegram-bot | grep "DEBUG:"
+   journalctl -u telegram-bot | grep "send_salary_notifications"
+   journalctl -u telegram-bot | grep "Д30"
+   
+   # Следить за логами в реальном времени
+   journalctl -u telegram-bot -f
+
+3. СОХРАНЕНИЕ ЛОГОВ В ФАЙЛ:
+   
+   # Сохранить последние 500 строк
+   journalctl -u telegram-bot -n 500 > /tmp/bot_logs.txt
+   
+   # Скачать файл на компьютер
+   scp root@185.245.34.167:/tmp/bot_logs.txt .
+
+─────────────────────────────────────────────────────────
+
+🔍 ЧТО ИСКАТЬ В ЛОГАХ:
+─────────────────────────────────────────────────────────
+
+1. УВЕДОМЛЕНИЯ О ЗП:
+   - "DEBUG: send_salary_notifications called"
+   - "DEBUG: Sending notification to"
+   - "DEBUG: Successfully sent notification"
+   - "DEBUG: Notifications summary"
+
+2. ОШИБКИ:
+   - "DEBUG: Failed to send"
+   - "No employee found for code"
+   - "Error", "Exception", "Traceback"
+
+3. ЗАГРУЗКА ФАЙЛОВ:
+   - "Обрабатываю лист выплат"
+   - "Extracted X payment records"
+   - "СОХРАНЕНО"
+
+─────────────────────────────────────────────────────────
+
+💡 ПРИМЕРЫ КОМАНД:
+─────────────────────────────────────────────────────────
+
+# Локально - найти все уведомления
+Get-Content bot_logs.txt | Select-String "notification"
+
+# Локально - последние 20 строк с DEBUG
+Get-Content bot_logs.txt | Select-String "DEBUG:" | Select-Object -Last 20
+
+# На сервере - логи за последние 10 минут
+journalctl -u telegram-bot --since "10 minutes ago"
+
+# На сервере - найти конкретного сотрудника
+journalctl -u telegram-bot | grep "Д30"
+
+─────────────────────────────────────────────────────────
+
