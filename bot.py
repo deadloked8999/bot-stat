@@ -545,6 +545,103 @@ def make_processed_key(code: str, name: Optional[str]) -> Tuple[str, str]:
     return code, (name or "").strip()
 
 
+async def send_salary_notifications(bot, uploaded_payments: List[Dict], club: str, date: str):
+    """
+    Автоматическая рассылка уведомлений о ЗП сотрудникам при загрузке файла
+    
+    Args:
+        bot: экземпляр Bot для отправки сообщений
+        uploaded_payments: список записей payments, которые были добавлены
+        club: клуб
+        date: дата
+    """
+    # Словарь для отслеживания уже отправленных уведомлений (code, date, club)
+    sent_notifications = set()
+    
+    for payment in uploaded_payments:
+        code = payment['code']
+        key = (code, date, club)
+        
+        # Пропускаем если уже отправили уведомление для этого кода/даты/клуба
+        if key in sent_notifications:
+            continue
+        
+        sent_notifications.add(key)
+        
+        # Получаем telegram_user_id из employees
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT telegram_user_id, full_name
+            FROM employees
+            WHERE code = ? AND club = ? AND telegram_user_id IS NOT NULL AND is_active = 1
+        """, (code, club))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            continue  # Нет telegram_user_id или сотрудник неактивен
+        
+        telegram_user_id, full_name = row
+        
+        # Формируем сообщение в формате "Последняя ЗП"
+        stavka = payment.get('stavka', 0)
+        lm_3 = payment.get('lm_3', 0)
+        percent_5 = payment.get('percent_5', 0)
+        promo = payment.get('promo', 0)
+        crz = payment.get('crz', 0)
+        cons = payment.get('cons', 0)
+        tips = payment.get('tips', 0)
+        fines = payment.get('fines', 0)
+        total_shift = payment.get('total_shift', 0)
+        debt = payment.get('debt', 0)
+        debt_nal = payment.get('debt_nal', 0)
+        to_pay = payment.get('to_pay', 0)
+        
+        # Пересчитываем К выплате
+        vychet_10 = round(debt * 0.1) if debt else 0
+        k_vyplate = round((debt_nal or 0) + (debt or 0) - vychet_10)
+        
+        msg = (
+            f"💰 ВАША ЗП НАЧИСЛЕНА\n\n"
+            f"📅 Дата: {date}\n"
+            f"💼 Код: {code}\n"
+            f"👤 {full_name or code}\n"
+            f"🏢 Клуб: {club}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💵 Ставка: {int(stavka)}\n"
+            f"📊 3% ЛМ: {int(lm_3)}\n"
+            f"📊 5%: {int(percent_5)}\n"
+            f"🎉 Промо: {int(promo)}\n"
+            f"🍽 CRZ: {int(crz)}\n"
+            f"🥂 Cons: {int(cons)}\n"
+            f"💸 Чаевые: {int(tips)}\n"
+        )
+        
+        if fines:
+            msg += f"⚠️ Штрафы: {int(fines)}\n"
+        
+        msg += (
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 ИТОГО выплат: {int(total_shift)}\n"
+            f"💵 Получила на смене: {int(to_pay or 0)}\n"
+            f"📋 Долг БН: {int(debt or 0)}\n"
+            f"📋 Долг НАЛ: {int(debt_nal or 0)}\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💎 К ВЫПЛАТЕ: {k_vyplate} ₽\n"
+        )
+        
+        # Отправляем уведомление (игнорируем ошибки)
+        try:
+            await bot.send_message(chat_id=telegram_user_id, text=msg)
+        except Exception as e:
+            # Игнорируем ошибки (пользователь заблокировал бота, удалил аккаунт и т.д.)
+            print(f"DEBUG: Failed to send salary notification to {telegram_user_id} ({code}): {e}")
+            pass
+
+
 # Инициализация базы данных
 db = Database()
 
@@ -6509,6 +6606,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         # DEBUG: Проверяем что сохранилось
         db.debug_payments(state.payments_upload_club, state.payments_upload_date)
+        
+        # Отправляем уведомления сотрудникам о начисленной ЗП
+        await send_salary_notifications(
+            context.bot,
+            state.payments_preview_data,
+            state.payments_upload_club,
+            state.payments_upload_date
+        )
         
         await query.edit_message_text(
             f"✅ ДАННЫЕ СОХРАНЕНЫ!\n\n"
