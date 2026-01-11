@@ -574,11 +574,13 @@ async def send_salary_notifications(bot, uploaded_payments: List[Dict], club: st
         sent_notifications.add(key)
         
         # Получаем telegram_user_id из employees (ищем по всем клубам для этого кода)
+        # Отправляем уведомление всем найденным telegram_user_id для этого кода,
+        # независимо от клуба в таблице employees (сотрудник может работать в обоих клубах)
         conn = db.get_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT telegram_user_id, full_name, club
+            SELECT DISTINCT telegram_user_id, full_name
             FROM employees
             WHERE code = ? AND telegram_user_id IS NOT NULL AND is_active = 1
         """, (code,))
@@ -591,14 +593,10 @@ async def send_salary_notifications(bot, uploaded_payments: List[Dict], club: st
             notifications_skipped += 1
             continue  # Нет telegram_user_id или сотрудник неактивен
         
-        # Отправляем уведомление для каждой найденной записи (если сотрудник в нескольких клубах)
+        # Отправляем уведомление для каждого найденного telegram_user_id
+        # (используем DISTINCT чтобы не отправлять дубликаты, если сотрудник в нескольких клубах)
         for row in rows:
-            telegram_user_id, full_name, employee_club = row
-            
-            # Проверяем, что сотрудник действительно работает в этом клубе
-            if employee_club != club:
-                print(f"DEBUG: Employee {code} ({full_name}) in club {employee_club}, but payment is for {club} - skipping")
-                continue
+            telegram_user_id, full_name = row
             
             print(f"DEBUG: Sending notification to {code} ({full_name}), TG_ID: {telegram_user_id}, club: {club}, date: {date}")
             
