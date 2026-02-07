@@ -5693,6 +5693,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     # Шапка таблицы
     headers = [
         'Дата', 'Клуб', 'Код', 'Имя',
+        'Принята', 'Уволена', 'Статус',
         'Ставка', '3% ЛМ', '5%', 'Промо',
         'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
         'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
@@ -5814,6 +5815,9 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                 payment['club'],
                 display_code,  # Используем обработанный код
                 payment['name'],
+                hired_str,
+                fired_str,
+                status_icon,
                 payment['stavka'],
                 payment['lm_3'],
                 payment['percent_5'],
@@ -5832,7 +5836,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             for col, value in enumerate(row_data, 1):
                 cell = ws.cell(row=row_num, column=col, value=value)
                 cell.border = border
-                if col > 4:  # Числовые столбцы (после Дата, Клуб, Код, Имя)
+                if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -5857,7 +5861,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
         
         itogo_data = [
-            'ИТОГО', '', '', '',  # Дата, Клуб, Код, Имя
+            'ИТОГО', '', '', '', '', '', '',  # Дата, Клуб, Код, Имя, Принята, Уволена, Статус
             totals['stavka'],
             totals['lm_3'],
             totals['percent_5'],
@@ -5877,7 +5881,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             cell = ws.cell(row=row_num, column=col, value=value)
             cell.font = Font(bold=True)
             cell.border = border
-            if col > 4:  # Числовые столбцы (после Дата, Клуб, Код, Имя)
+            if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
                 cell.alignment = Alignment(horizontal='right', vertical='center')
             else:
                 cell.alignment = Alignment(horizontal='center', vertical='center')
