@@ -5667,13 +5667,21 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         merged_map[(club, original_code)] = (merged_code, merged_name)
     conn_temp.close()
     
+    print(f"DEBUG: Found {len(merge_rows)} employee merges")
+    print(f"DEBUG: Before grouping: {len(all_payments)} payments")
+    
     # Заменяем коды в payments
+    replaced_count = 0
     for payment in all_payments:
         key = (payment['club'], payment['code'])
         if key in merged_map:
             merged_code, merged_name = merged_map[key]
             payment['code'] = merged_code
             payment['name'] = merged_name
+            replaced_count += 1
+    
+    if replaced_count > 0:
+        print(f"DEBUG: Replaced {replaced_count} payment codes with merged codes")
     
     # Группируем по (date, club, code) и суммируем
     from collections import defaultdict
@@ -5688,6 +5696,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                          'tips', 'total_shift', 'to_pay', 'debt', 'debt_nal']:
                 grouped_payments[key][field] += payment[field]
     
+    print(f"DEBUG: After grouping: {len(grouped_payments)} payments")
     all_payments = list(grouped_payments.values())
     
     if not all_payments:
