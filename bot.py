@@ -6178,7 +6178,9 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         grand_totals['debt'],
         vychet_10_grand,
         grand_totals['debt_nal'],
-        round(grand_totals['final_pay'])  # Округление до целого
+        round(grand_totals['final_pay']),  # Округление до целого
+        '',  # Самозанятость (пусто в ИТОГО)
+        ''   # К выплате (самозанятый) (пусто в ИТОГО)
     ]
     
     for col, value in enumerate(itogo_data, 1):
@@ -6186,7 +6188,12 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         cell.font = Font(bold=True)
         cell.border = border
         if col > 4:  # Числовые столбцы (после Дата, Клуб, Код, Имя)
-            cell.alignment = Alignment(horizontal='right', vertical='center')
+            # Определяем индекс колонки "Самозанятость" (предпоследняя)
+            self_employed_col = len(headers) - 1
+            if col == self_employed_col:  # Колонка "Самозанятость" - по центру
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='right', vertical='center')
         else:
             cell.alignment = Alignment(horizontal='center', vertical='center')
     
