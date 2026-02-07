@@ -6099,6 +6099,17 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         vychet_10 = round(emp['debt'] * 0.1)  # Округление до целого
         k_vyplate = round(emp['debt_nal'] + emp['debt'] - vychet_10)
         
+        # Проверка самозанятости
+        normalized_code_for_check = emp['code'].upper().strip()
+        is_self_employed = db.is_self_employed(normalized_code_for_check)
+        
+        if is_self_employed:
+            self_employed_mark = '✓'
+            self_employed_payout = round(k_vyplate / 0.94, 2)
+        else:
+            self_employed_mark = ''
+            self_employed_payout = ''
+        
         row_data = [
             '',  # Дата пустая в ИТОГО
             '',  # Клуб пустой в ИТОГО
@@ -6116,14 +6127,21 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             emp['debt'],
             vychet_10,
             emp['debt_nal'],
-            k_vyplate
+            k_vyplate,
+            self_employed_mark,  # Самозанятость
+            self_employed_payout  # К выплате (самозанятый)
         ]
         
         for col, value in enumerate(row_data, 1):
             cell = ws_itogo.cell(row=row_num, column=col, value=value)
             cell.border = border
             if col > 4:  # Числовые столбцы (после Дата, Клуб, Код, Имя)
-                cell.alignment = Alignment(horizontal='right', vertical='center')
+                # Определяем индекс колонки "Самозанятость" (предпоследняя)
+                self_employed_col = len(headers) - 1
+                if col == self_employed_col:  # Колонка "Самозанятость" - по центру
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
             else:
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         
