@@ -807,6 +807,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     
+    # Обработка команд владельца
+    if state.owner_mode:
+        # Команда "ОТЧЁТ"
+        if text_lower in ['отчет', 'отчёт', '📊 отчёт', '📊 отчет']:
+            await update.message.reply_text(
+                "📊 ОТЧЁТ\n\n"
+                "Введите период:\n"
+                "• ДД.ММ (один день)\n"
+                "• ДД.ММ-ДД.ММ (период)\n\n"
+                "Примеры:\n"
+                "• 10.01\n"
+                "• 04.01-10.01"
+            )
+            state.mode = 'awaiting_report_period'
+            return
+        
+        # Команда "ЗП"
+        if text_lower in ['зп', '💵 зп']:
+            await update.message.reply_text(
+                "💵 ОТЧЁТ ЗП\n\n"
+                "Введите:\n"
+                "• Код + период (Д7 3,10-5,11)\n"
+                "• Или клуб + период (москвич 3,10-5,11)\n"
+                "• Или оба + период (оба 3,10-5,11)"
+            )
+            state.mode = 'awaiting_salary_input'
+            return
+        
+        # Команда "ВЫХОД"
+        if text_lower in ['выход', '🚪 выход']:
+            state.owner_mode = False
+            state.mode = None
+            await update.message.reply_text(
+                "🚪 Выход выполнен\n\n"
+                "Для повторного входа используйте /start",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        
+        # Неизвестная команда для владельца
+        await update.message.reply_text(
+            "❌ Неизвестная команда\n\n"
+            "Доступные команды:\n"
+            "• 📊 ОТЧЁТ\n"
+            "• 💵 ЗП\n"
+            "• 🚪 ВЫХОД"
+        )
+        return
+    
     # Проверка авторизации
     if not db.is_admin(user_id) and not state.employee_mode:
         # Специальный код для limited_access
@@ -1975,6 +2024,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "💄 УПРАВЛЕНИЕ РАСХОДАМИ НА СТИЛИСТОВ\n\n"
             "Выберите действие:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    # Команда "ВЛАДЕЛЬЦЫ" (только для админов)
+    if text_lower in ['владельцы', '👔 владельцы']:
+        if not db.is_admin(user_id):
+            await update.message.reply_text("🔒 Доступ запрещён. Только для админов.")
+            return
+        
+        owners = db.get_all_owners()
+        
+        if not owners:
+            # Нет владельцев - показываем только кнопку добавления
+            keyboard = [[InlineKeyboardButton("➕ Добавить владельца", callback_data="owner_add")]]
+            await update.message.reply_text(
+                "👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n"
+                "❌ Владельцы не найдены.\n\n"
+                "Нажмите кнопку ниже для добавления:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+        
+        # Показать список владельцев с кнопками управления
+        keyboard = []
+        owners_text_lines = []
+        
+        for owner in owners:
+            status = "✅" if owner['is_active'] else "❌"
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{status} {owner['telegram_user_id']}", 
+                    callback_data=f"owner_view_{owner['telegram_user_id']}"
+                )
+            ])
+            owners_text_lines.append(
+                f"{status} {owner['telegram_user_id']} (добавлен: {owner['created_at'][:10]})"
+            )
+        
+        keyboard.append([InlineKeyboardButton("➕ Добавить владельца", callback_data="owner_add")])
+        
+        await update.message.reply_text(
+            f"👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n" + "\n".join(owners_text_lines),
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
