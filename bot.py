@@ -5287,25 +5287,13 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     row_num = 4
     
     # Шапка таблицы
-    if is_employee_request:
-        # Для сотрудников: без колонок "Принята", "Уволена", "Статус"
-        headers = [
-            'Дата', 'Клуб', 'Код', 'Имя', 
-            'Ставка', '3% ЛМ', '5%', 'Промо',
-            'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
-            'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате',
-            'Самозанятость', 'К выплате (самозанятый)'
-        ]
-    else:
-        # Для админов: со всеми колонками
-        headers = [
-            'Дата', 'Клуб', 'Код', 'Имя', 
-            'Принята', 'Уволена', 'Статус',
-            'Ставка', '3% ЛМ', '5%', 'Промо',
-            'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
-            'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате',
-            'Самозанятость', 'К выплате (самозанятый)'
-        ]
+    headers = [
+        'Дата', 'Клуб', 'Код', 'Имя', 
+        'Ставка', '3% ЛМ', '5%', 'Промо',
+        'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
+        'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате',
+        'Самозанятость', 'К выплате (самозанятый)'
+    ]
     
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=row_num, column=col, value=header)
@@ -5321,11 +5309,6 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         'crz': 0, 'cons': 0, 'tips': 0, 'total_shift': 0,
         'to_pay': 0, 'debt': 0, 'debt_nal': 0, 'final_pay': 0
     }
-    
-    # Получаем соединение для запросов к БД (только если нужно)
-    conn = None
-    if not is_employee_request:
-        conn = db.get_connection()
     
     # Данные
     for payment in all_payments:
@@ -5347,66 +5330,6 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         elif display_code.startswith('Уборщица'):
             display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
         
-        # Получаем даты найма/увольнения (только если не для сотрудника)
-        if not is_employee_request:
-            cursor_temp = conn.cursor()
-            
-            # Сначала проверяем employee_history (по дате выплаты)
-            cursor_temp.execute("""
-                SELECT hired_date, fired_date
-                FROM employee_history
-                WHERE code = ? AND club = ?
-                  AND ? BETWEEN hired_date AND COALESCE(fired_date, '9999-12-31')
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (payment['code'], payment['club'], payment['date']))
-            
-            hist_row = cursor_temp.fetchone()
-            
-            if hist_row:
-                # Нашли в истории - используем исторические данные
-                hired_date = hist_row[0]
-                fired_date = hist_row[1]
-                is_active = 0  # Уволенный сотрудник
-            else:
-                # НЕ нашли в истории - проверяем employees (текущий сотрудник)
-                cursor_temp.execute("""
-                    SELECT hired_date, fired_date, is_active
-                    FROM employees
-                    WHERE code = ? AND club = ?
-                """, (payment['code'], payment['club']))
-                
-                emp_row = cursor_temp.fetchone()
-                if emp_row:
-                    hired_date = emp_row[0]
-                    fired_date = emp_row[1]
-                    is_active = emp_row[2]
-                else:
-                    hired_date = None
-                    fired_date = None
-                    is_active = 1
-            
-            # Форматируем даты
-            if hired_date:
-                try:
-                    year, month, day = hired_date.split('-')
-                    hired_str = f"{day}.{month}.{year[2:]}"
-                except:
-                    hired_str = hired_date
-            else:
-                hired_str = '-'
-            
-            if fired_date:
-                try:
-                    year, month, day = fired_date.split('-')
-                    fired_str = f"{day}.{month}.{year[2:]}"
-                except:
-                    fired_str = fired_date
-            else:
-                fired_str = '-'
-            
-            status_icon = '✅' if is_active else '🗂️'
-        
         # Проверяем самозанятость
         normalized_code = payment['code'].upper().strip()
         is_self_employed = db.is_self_employed(normalized_code)
@@ -5420,56 +5343,28 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
             self_employed_payout = ''
             self_employed_icon = ''
         
-        # Записываем строку
-        if is_employee_request:
-            # Для сотрудников: без колонок "Принята", "Уволена", "Статус"
-            row_data = [
-                date_short,
-                payment['club'],
-                display_code,  # Используем обработанный код
-                payment['name'],
-                payment['stavka'],
-                payment['lm_3'],
-                payment['percent_5'],
-                payment['promo'],
-                payment['crz'],
-                payment['cons'],
-                payment['tips'],
-                payment['total_shift'],
-                payment['to_pay'],
-                payment['debt'],
-                vychet_10,
-                payment['debt_nal'],
-                k_vyplate,  # БЕЗ stylist_amount
-                self_employed_icon,  # Самозанятость
-                self_employed_payout  # К выплате (самозанятый)
-            ]
-        else:
-            # Для админов: со всеми колонками
-            row_data = [
-                date_short,
-                payment['club'],
-                display_code,  # Используем обработанный код
-                payment['name'],
-                hired_str,
-                fired_str,
-                status_icon,
-                payment['stavka'],
-                payment['lm_3'],
-                payment['percent_5'],
-                payment['promo'],
-                payment['crz'],
-                payment['cons'],
-                payment['tips'],
-                payment['total_shift'],
-                payment['to_pay'],
-                payment['debt'],
-                vychet_10,
-                payment['debt_nal'],
-                k_vyplate,  # БЕЗ stylist_amount
-                self_employed_icon,  # Самозанятость
-                self_employed_payout  # К выплате (самозанятый)
-            ]
+        # Записываем строку (одинаково для всех)
+        row_data = [
+            date_short,
+            payment['club'],
+            display_code,  # Используем обработанный код
+            payment['name'],
+            payment['stavka'],
+            payment['lm_3'],
+            payment['percent_5'],
+            payment['promo'],
+            payment['crz'],
+            payment['cons'],
+            payment['tips'],
+            payment['total_shift'],
+            payment['to_pay'],
+            payment['debt'],
+            vychet_10,
+            payment['debt_nal'],
+            k_vyplate,  # БЕЗ stylist_amount
+            self_employed_icon,  # Самозанятость
+            self_employed_payout  # К выплате (самозанятый)
+        ]
         
         for col, value in enumerate(row_data, 1):
             cell = ws.cell(row=row_num, column=col, value=value)
@@ -5520,73 +5415,41 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
     # Строка ИТОГО
     vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
     
-    if is_employee_request:
-        # Для сотрудников: без колонок "Принята", "Уволена", "Статус"
-        itogo_data = [
-            'ИТОГО', '', '', '',  # Дата, Клуб, Код, Имя
-            totals['stavka'],
-            totals['lm_3'],
-            totals['percent_5'],
-            totals['promo'],
-            totals['crz'],
-            totals['cons'],
-            totals['tips'],
-            totals['total_shift'],
-            totals['to_pay'],
-            totals['debt'],
-            vychet_10_total,
-            totals['debt_nal'],
-            round(totals['final_pay']),  # Округление до целого
-            '',  # Самозанятость (пусто для итогов)
-            ''   # К выплате (самозанятый) (пусто для итогов)
-        ]
-    else:
-        # Для админов: со всеми колонками
-        itogo_data = [
-            'ИТОГО', '', '', '', '', '', '',  # Дата, Клуб, Код, Имя, Принята, Уволена, Статус
-            totals['stavka'],
-            totals['lm_3'],
-            totals['percent_5'],
-            totals['promo'],
-            totals['crz'],
-            totals['cons'],
-            totals['tips'],
-            totals['total_shift'],
-            totals['to_pay'],
-            totals['debt'],
-            vychet_10_total,
-            totals['debt_nal'],
-            round(totals['final_pay']),  # Округление до целого
-            '',  # Самозанятость (пусто для итогов)
-            ''   # К выплате (самозанятый) (пусто для итогов)
-        ]
+    # ИТОГО
+    vychet_10_total = round(totals['debt'] * 0.1)
+    itogo_data = [
+        'ИТОГО', '', '', '',  # Дата, Клуб, Код, Имя
+        totals['stavka'],
+        totals['lm_3'],
+        totals['percent_5'],
+        totals['promo'],
+        totals['crz'],
+        totals['cons'],
+        totals['tips'],
+        totals['total_shift'],
+        totals['to_pay'],
+        totals['debt'],
+        vychet_10_total,
+        totals['debt_nal'],
+        round(totals['final_pay']),  # Округление до целого
+        '',  # Самозанятость (пусто для итогов)
+        ''   # К выплате (самозанятый) (пусто для итогов)
+    ]
     
     for col, value in enumerate(itogo_data, 1):
         cell = ws.cell(row=row_num, column=col, value=value)
         cell.font = Font(bold=True)
         cell.border = border
-        if is_employee_request:
-            # Для сотрудников: числовые столбцы после Имя (col > 4)
-            if col > 4:
-                # Определяем индекс колонки "Самозанятость" (предпоследняя)
-                self_employed_col = len(headers) - 1
-                if col == self_employed_col:  # Колонка "Самозанятость" - по центру
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                else:
-                    cell.alignment = Alignment(horizontal='right', vertical='center')
-            else:
+        # Числовые столбцы после Имя (col > 4)
+        if col > 4:
+            # Определяем индекс колонки "Самозанятость" (предпоследняя)
+            self_employed_col = len(headers) - 1
+            if col == self_employed_col:  # Колонка "Самозанятость" - по центру
                 cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='right', vertical='center')
         else:
-            # Для админов: числовые столбцы после Статус (col > 7)
-            if col > 7:
-                # Определяем индекс колонки "Самозанятость" (предпоследняя)
-                self_employed_col = len(headers) - 1
-                if col == self_employed_col:  # Колонка "Самозанятость" - по центру
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                else:
-                    cell.alignment = Alignment(horizontal='right', vertical='center')
-            else:
-                cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.alignment = Alignment(horizontal='center', vertical='center')
     
     # Автоподгонка ширины
     for column in ws.columns:
