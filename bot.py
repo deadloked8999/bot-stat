@@ -5351,35 +5351,36 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         if not is_employee_request:
             cursor_temp = conn.cursor()
             
-            # Сначала проверяем employees
+            # Сначала проверяем employee_history (по дате выплаты)
             cursor_temp.execute("""
-                SELECT hired_date, fired_date, is_active
-                FROM employees
+                SELECT hired_date, fired_date
+                FROM employee_history
                 WHERE code = ? AND club = ?
-            """, (payment['code'], payment['club']))
+                  AND ? BETWEEN hired_date AND COALESCE(fired_date, '9999-12-31')
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (payment['code'], payment['club'], payment['date']))
             
-            emp_row = cursor_temp.fetchone()
+            hist_row = cursor_temp.fetchone()
             
-            if emp_row:
-                hired_date = emp_row[0]
-                fired_date = emp_row[1]
-                is_active = emp_row[2]
+            if hist_row:
+                # Нашли в истории - используем исторические данные
+                hired_date = hist_row[0]
+                fired_date = hist_row[1]
+                is_active = 0  # Уволенный сотрудник
             else:
-                # Проверяем employee_history
+                # НЕ нашли в истории - проверяем employees (текущий сотрудник)
                 cursor_temp.execute("""
-                    SELECT hired_date, fired_date
-                    FROM employee_history
+                    SELECT hired_date, fired_date, is_active
+                    FROM employees
                     WHERE code = ? AND club = ?
-                      AND ? BETWEEN hired_date AND COALESCE(fired_date, '9999-12-31')
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, (payment['code'], payment['club'], payment['date']))
+                """, (payment['code'], payment['club']))
                 
-                hist_row = cursor_temp.fetchone()
-                if hist_row:
-                    hired_date = hist_row[0]
-                    fired_date = hist_row[1]
-                    is_active = 0
+                emp_row = cursor_temp.fetchone()
+                if emp_row:
+                    hired_date = emp_row[0]
+                    fired_date = emp_row[1]
+                    is_active = emp_row[2]
                 else:
                     hired_date = None
                     fired_date = None
