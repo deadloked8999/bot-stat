@@ -171,10 +171,11 @@ class Database:
         admin_count = cursor.fetchone()[0]
         
         if admin_count == 0:
-            # Добавляем двух основных админов
+            # Добавляем основных админов
             admins_to_add = [
                 (1380211249, "Админ 1"),
-                (7942920768, "Админ 2")
+                (7942920768, "Админ 2"),
+                (7417663277, "Админ 3")
             ]
             
             for admin_id, admin_name in admins_to_add:
