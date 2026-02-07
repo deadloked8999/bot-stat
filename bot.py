@@ -5693,14 +5693,10 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     # Шапка таблицы
     headers = [
         'Дата', 'Клуб', 'Код', 'Имя',
-        'Принята', 'Уволена', 'Статус',
         'Ставка', '3% ЛМ', '5%', 'Промо',
         'CRZ', 'Cons', 'Чаевые', 'ИТОГО выплат', 'Получила на смене',
         'Долг БН', '10% (вычет)', 'Долг НАЛ', 'К выплате'
     ]
-    
-    # Получаем соединение для запросов к БД
-    conn = db.get_connection()
     
     # Функция для создания листа с данными
     def create_sheet(ws, title, payments_list, show_date_col=True):
@@ -5751,73 +5747,12 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             elif display_code.startswith('Уборщица'):
                 display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
             
-            # Получаем даты найма/увольнения
-            cursor_temp = conn.cursor()
-            
-            # Сначала проверяем employees (используем нормализованный код)
-            cursor_temp.execute("""
-                SELECT hired_date, fired_date, is_active
-                FROM employees
-                WHERE code = ? AND club = ?
-            """, (normalized_code, payment['club']))
-            
-            emp_row = cursor_temp.fetchone()
-            
-            if emp_row:
-                hired_date = emp_row[0]
-                fired_date = emp_row[1]
-                is_active = emp_row[2]
-            else:
-                # Проверяем employee_history (используем нормализованный код)
-                cursor_temp.execute("""
-                    SELECT hired_date, fired_date
-                    FROM employee_history
-                    WHERE code = ? AND club = ?
-                      AND ? BETWEEN hired_date AND COALESCE(fired_date, '9999-12-31')
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, (normalized_code, payment['club'], payment['date']))
-                
-                hist_row = cursor_temp.fetchone()
-                if hist_row:
-                    hired_date = hist_row[0]
-                    fired_date = hist_row[1]
-                    is_active = 0
-                else:
-                    hired_date = None
-                    fired_date = None
-                    is_active = 1
-            
-            # Форматируем даты
-            if hired_date:
-                try:
-                    year, month, day = hired_date.split('-')
-                    hired_str = f"{day}.{month}.{year[2:]}"
-                except:
-                    hired_str = hired_date
-            else:
-                hired_str = '-'
-            
-            if fired_date:
-                try:
-                    year, month, day = fired_date.split('-')
-                    fired_str = f"{day}.{month}.{year[2:]}"
-                except:
-                    fired_str = fired_date
-            else:
-                fired_str = '-'
-            
-            status_icon = '✅' if is_active else '🗂️'
-            
             # Записываем строку
             row_data = [
                 date_short if show_date_col else '',
                 payment['club'],
                 display_code,  # Используем обработанный код
                 payment['name'],
-                hired_str,
-                fired_str,
-                status_icon,
                 payment['stavka'],
                 payment['lm_3'],
                 payment['percent_5'],
@@ -5836,7 +5771,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             for col, value in enumerate(row_data, 1):
                 cell = ws.cell(row=row_num, column=col, value=value)
                 cell.border = border
-                if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
+                if col > 4:  # Числовые столбцы (после Дата, Клуб, Код, Имя)
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -5861,7 +5796,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
         
         itogo_data = [
-            'ИТОГО', '', '', '', '', '', '',  # Дата, Клуб, Код, Имя, Принята, Уволена, Статус
+            'ИТОГО', '', '', '',  # Дата, Клуб, Код, Имя
             totals['stavka'],
             totals['lm_3'],
             totals['percent_5'],
@@ -5881,7 +5816,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             cell = ws.cell(row=row_num, column=col, value=value)
             cell.font = Font(bold=True)
             cell.border = border
-            if col > 7:  # Числовые столбцы (после Принята, Уволена, Статус)
+            if col > 4:  # Числовые столбцы (после Дата, Клуб, Код, Имя)
                 cell.alignment = Alignment(horizontal='right', vertical='center')
             else:
                 cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -6257,9 +6192,6 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             filename=filename,
             caption=f"💵 Отчёт ЗП: {club_names}\nПериод: {date_from} .. {date_to}"
         )
-    
-    # Закрываем соединение
-    conn.close()
     
     import os
     os.remove(filename)
