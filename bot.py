@@ -113,6 +113,9 @@ class UserState:
         self.employee_club: Optional[str] = None
         self.employee_name: Optional[str] = None
         
+        # Для режима владельца
+        self.owner_mode: bool = False
+        
         # Для предпросмотра данных
         self.preview_date: Optional[str] = None
         self.preview_duplicates: Optional[list] = None
@@ -167,6 +170,7 @@ class UserState:
         self.edit_employee_selected = None
         self.employee_mode = False
         self.employee_code = None
+        self.owner_mode = False
         self.employee_club = None
         self.employee_name = None
     
@@ -203,7 +207,7 @@ def get_main_keyboard():
         ['✏️ ИСПРАВИТЬ', '🗑️ УДАЛИТЬ'],
         ['📜 ЖУРНАЛ', '👔 САМОЗАНЯТЫЕ'],
         ['👥 СОТРУДНИКИ', '💄 СТИЛИСТЫ'],
-        ['❓ ПОМОЩЬ', '🚪 ЗАВЕРШИТЬ']
+        ['👔 ВЛАДЕЛЬЦЫ', '🚪 ЗАВЕРШИТЬ']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -232,6 +236,15 @@ def get_employee_menu_keyboard():
         ['💰 Моя ЗП'],  # Последняя начисленная ЗП
         ['💵 История выплат'],  # История последних выплат
         ['❌ Выход']
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def get_owner_menu_keyboard():
+    """Клавиатура для владельцев (ограниченный доступ)"""
+    keyboard = [
+        ['📊 ОТЧЁТ', '💵 ЗП'],
+        ['🚪 ВЫХОД']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
