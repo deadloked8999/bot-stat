@@ -5655,19 +5655,16 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     
     # Применяем объединения из employee_merges
     merged_map = {}  # {(club, original_code): (merged_code, merged_name)}
-    merges = db.get_all_employee_merges()
     conn_temp = db.get_connection()
     cursor_temp = conn_temp.cursor()
-    for merge in merges:
-        # Получаем merged_name для этого объединения
-        cursor_temp.execute("""
-            SELECT merged_name FROM employee_merges
-            WHERE club = ? AND original_code = ? AND merged_code = ?
-            LIMIT 1
-        """, (merge['club'], merge['code'], merge['main_code']))
-        name_row = cursor_temp.fetchone()
-        merged_name = name_row[0] if name_row else merge['main_code']
-        merged_map[(merge['club'], merge['code'])] = (merge['main_code'], merged_name)
+    cursor_temp.execute("""
+        SELECT club, original_code, merged_code, merged_name
+        FROM employee_merges
+    """)
+    merge_rows = cursor_temp.fetchall()
+    for row in merge_rows:
+        club, original_code, merged_code, merged_name = row
+        merged_map[(club, original_code)] = (merged_code, merged_name)
     conn_temp.close()
     
     # Заменяем коды в payments
