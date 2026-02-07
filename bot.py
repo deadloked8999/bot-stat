@@ -862,7 +862,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     
     # Проверка авторизации
-    if not db.is_admin(user_id) and not state.employee_mode:
+    if not db.is_admin(user_id) and not state.employee_mode and not state.owner_mode:
         # Специальный код для limited_access
         if text == "0001":
             state.limited_access = True
