@@ -2081,6 +2081,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_self_employed_remove(update, state, text)
         return
     
+    # Обработка ввода Telegram ID для добавления владельца
+    if state.mode == 'awaiting_owner_add':
+        if not db.is_admin(user_id):
+            await update.message.reply_text("🔒 Доступ запрещён")
+            state.mode = None
+            return
+        
+        try:
+            owner_id = int(text.strip())
+            
+            if db.add_owner(owner_id, user_id):
+                await update.message.reply_text(
+                    f"✅ ВЛАДЕЛЕЦ ДОБАВЛЕН\n\n"
+                    f"Telegram ID: {owner_id}\n\n"
+                    f"Пользователь теперь имеет доступ к функциям:\n"
+                    f"• 📊 ОТЧЁТ\n"
+                    f"• 💵 ЗП"
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ ОШИБКА\n\n"
+                    f"Не удалось добавить владельца.\n"
+                    f"Возможно, пользователь уже добавлен."
+                )
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Неверный формат\n\n"
+                "Введите числовой Telegram ID\n"
+                "Например: 123456789"
+            )
+            return
+        
+        state.mode = None
+        return
+    
     # Обработка добавления доступа
     # === ОБРАБОТКА ВВОДА ПРИ РЕДАКТИРОВАНИИ СОТРУДНИКОВ ===
     
@@ -7799,6 +7834,127 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         await query.edit_message_text("❌ Отменено")
         state.mode = None
+    
+    # ============================================
+    # ОБРАБОТЧИКИ ДЛЯ ВЛАДЕЛЬЦЕВ
+    # ============================================
+    
+    elif query.data == 'owner_add':
+        # Добавление нового владельца
+        if not db.is_admin(user_id):
+            await query.answer("🔒 Доступ запрещён", show_alert=True)
+            return
+        
+        await query.edit_message_text(
+            "➕ ДОБАВЛЕНИЕ ВЛАДЕЛЬЦА\n\n"
+            "Введите Telegram ID пользователя:\n"
+            "(например: 123456789)"
+        )
+        state.mode = 'awaiting_owner_add'
+
+    elif query.data.startswith('owner_view_'):
+        # Просмотр/удаление владельца
+        if not db.is_admin(user_id):
+            await query.answer("🔒 Доступ запрещён", show_alert=True)
+            return
+        
+        owner_id = int(query.data.replace('owner_view_', ''))
+        
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Удалить владельца", callback_data=f"owner_delete_{owner_id}")],
+            [InlineKeyboardButton("◀️ Назад к списку", callback_data="owner_back")]
+        ]
+        
+        await query.edit_message_text(
+            f"👔 ВЛАДЕЛЕЦ\n\n"
+            f"Telegram ID: {owner_id}\n\n"
+            f"Выберите действие:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif query.data.startswith('owner_delete_'):
+        # Удаление владельца
+        if not db.is_admin(user_id):
+            await query.answer("🔒 Доступ запрещён", show_alert=True)
+            return
+        
+        owner_id = int(query.data.replace('owner_delete_', ''))
+        
+        if db.remove_owner(owner_id):
+            await query.answer("✅ Владелец удалён", show_alert=True)
+            
+            # Показать обновлённый список
+            owners = db.get_all_owners()
+            
+            if not owners:
+                keyboard = [[InlineKeyboardButton("➕ Добавить владельца", callback_data="owner_add")]]
+                await query.edit_message_text(
+                    "👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n"
+                    "❌ Владельцы не найдены.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                keyboard = []
+                owners_text_lines = []
+                
+                for owner in owners:
+                    status = "✅" if owner['is_active'] else "❌"
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"{status} {owner['telegram_user_id']}", 
+                            callback_data=f"owner_view_{owner['telegram_user_id']}"
+                        )
+                    ])
+                    owners_text_lines.append(
+                        f"{status} {owner['telegram_user_id']} (добавлен: {owner['created_at'][:10]})"
+                    )
+                
+                keyboard.append([InlineKeyboardButton("➕ Добавить владельца", callback_data="owner_add")])
+                
+                await query.edit_message_text(
+                    f"👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n" + "\n".join(owners_text_lines),
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        else:
+            await query.answer("❌ Ошибка удаления", show_alert=True)
+
+    elif query.data == 'owner_back':
+        # Возврат к списку владельцев
+        if not db.is_admin(user_id):
+            await query.answer("🔒 Доступ запрещён", show_alert=True)
+            return
+        
+        owners = db.get_all_owners()
+        
+        if not owners:
+            keyboard = [[InlineKeyboardButton("➕ Добавить владельца", callback_data="owner_add")]]
+            await query.edit_message_text(
+                "👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n"
+                "❌ Владельцы не найдены.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            keyboard = []
+            owners_text_lines = []
+            
+            for owner in owners:
+                status = "✅" if owner['is_active'] else "❌"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{status} {owner['telegram_user_id']}", 
+                        callback_data=f"owner_view_{owner['telegram_user_id']}"
+                    )
+                ])
+                owners_text_lines.append(
+                    f"{status} {owner['telegram_user_id']} (добавлен: {owner['created_at'][:10]})"
+                )
+            
+            keyboard.append([InlineKeyboardButton("➕ Добавить владельца", callback_data="owner_add")])
+            
+            await query.edit_message_text(
+                f"👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n" + "\n".join(owners_text_lines),
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
