@@ -1783,6 +1783,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Обработка выбора клуба для отчета
     if state.mode == 'awaiting_report_club':
+        # Доступно для админов и владельцев
+        if not db.is_admin(user_id) and not state.owner_mode:
+            await update.message.reply_text("🔒 Доступ запрещён")
+            state.mode = None
+            return
+        
         if text_lower in ['москвич', 'анора', 'оба']:
             state.report_club = text_lower
             await update.message.reply_text(
@@ -1799,6 +1805,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Обработка периода для отчета
     if state.mode == 'awaiting_report_period':
+        # Доступно для админов и владельцев
+        if not db.is_admin(user_id) and not state.owner_mode:
+            await update.message.reply_text("🔒 Доступ запрещён")
+            state.mode = None
+            return
+        
         # Проверяем, это одна дата или диапазон
         if '-' in text:
             # Диапазон дат: 10,06-11,08
@@ -1888,6 +1900,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Обработка ввода для ЗП (после кнопки)
     if state.mode == 'awaiting_salary_input':
+        # Доступно для админов и владельцев
+        if not db.is_admin(user_id) and not state.owner_mode:
+            await update.message.reply_text("🔒 Доступ запрещён")
+            state.mode = None
+            return
+        
         await handle_salary_command(update, context, state, text)
         state.mode = None
         return
