@@ -5745,7 +5745,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
     ]
     
     # Получаем соединение для запросов к БД
-    conn = db.get_connection()
+    conn_temp = db.get_connection()
     
     # Функция для создания листа с данными
     def create_sheet(ws, title, payments_list, show_date_col=True):
@@ -5797,7 +5797,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
                 display_code = 'Уборщица'  # Убираем "Москвич/Анора" из кода для отображения
             
             # Получаем даты найма/увольнения
-            cursor_temp = conn.cursor()
+            cursor_temp = conn_temp.cursor()
             
             # Сначала проверяем employees (используем нормализованный код)
             cursor_temp.execute("""
@@ -6012,7 +6012,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         emp = employee_totals[key]
         
         # Получаем даты найма/увольнения
-        cursor_temp = conn.cursor()
+        cursor_temp = conn_temp.cursor()
         
         # Используем реальный код и клуб из employee_totals
         # Сначала проверяем employees
@@ -6298,7 +6298,7 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
         )
     
     # Закрываем соединение
-    conn.close()
+    conn_temp.close()
     
     import os
     os.remove(filename)
