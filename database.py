@@ -1368,6 +1368,26 @@ class Database:
             conn.close()
             return None
     
+    def get_all_employee_merges(self):
+        """Получить все объединения сотрудников"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT club, original_code, merged_code
+                FROM employee_merges
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+            return [
+                {'club': row[0], 'code': row[1], 'main_code': row[2]}
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения объединений: {e}")
+            conn.close()
+            return []
+    
     # ============ Методы для работы с расходами на стилистов ============
     
     def add_stylist_expense(self, club: str, period_from: str, period_to: str, 

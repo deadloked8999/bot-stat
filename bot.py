@@ -5653,6 +5653,46 @@ async def generate_salary_excel_by_club(update: Update, clubs: List[str], date_f
             }
             all_payments.append(payment_dict)
     
+    # Применяем объединения из employee_merges
+    merged_map = {}  # {(club, original_code): (merged_code, merged_name)}
+    merges = db.get_all_employee_merges()
+    conn_temp = db.get_connection()
+    cursor_temp = conn_temp.cursor()
+    for merge in merges:
+        # Получаем merged_name для этого объединения
+        cursor_temp.execute("""
+            SELECT merged_name FROM employee_merges
+            WHERE club = ? AND original_code = ? AND merged_code = ?
+            LIMIT 1
+        """, (merge['club'], merge['code'], merge['main_code']))
+        name_row = cursor_temp.fetchone()
+        merged_name = name_row[0] if name_row else merge['main_code']
+        merged_map[(merge['club'], merge['code'])] = (merge['main_code'], merged_name)
+    conn_temp.close()
+    
+    # Заменяем коды в payments
+    for payment in all_payments:
+        key = (payment['club'], payment['code'])
+        if key in merged_map:
+            merged_code, merged_name = merged_map[key]
+            payment['code'] = merged_code
+            payment['name'] = merged_name
+    
+    # Группируем по (date, club, code) и суммируем
+    from collections import defaultdict
+    grouped_payments = {}
+    for payment in all_payments:
+        key = (payment['date'], payment['club'], payment['code'])
+        if key not in grouped_payments:
+            grouped_payments[key] = payment.copy()
+        else:
+            # Суммируем числовые поля
+            for field in ['stavka', 'lm_3', 'percent_5', 'promo', 'crz', 'cons', 
+                         'tips', 'total_shift', 'to_pay', 'debt', 'debt_nal']:
+                grouped_payments[key][field] += payment[field]
+    
+    all_payments = list(grouped_payments.values())
+    
     if not all_payments:
         club_names = ', '.join(clubs)
         await update.message.reply_text(
