@@ -166,6 +166,17 @@ class Database:
             )
         """)
         
+        # Таблица владельцев
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS owners (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_user_id INTEGER UNIQUE NOT NULL,
+                added_by INTEGER,
+                created_at TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+        
         # Добавляем админов если их ещё нет
         cursor.execute("SELECT COUNT(*) FROM admins")
         admin_count = cursor.fetchone()[0]
@@ -2095,6 +2106,80 @@ class Database:
             print(f"Ошибка добавления админа: {e}")
             conn.close()
             return False
+    
+    def add_owner(self, telegram_user_id: int, added_by: int) -> bool:
+        """Добавить владельца"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO owners (telegram_user_id, added_by, created_at)
+                VALUES (?, ?, ?)
+            """, (telegram_user_id, added_by, datetime.now().isoformat()))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка добавления владельца: {e}")
+            conn.close()
+            return False
+
+    def remove_owner(self, telegram_user_id: int) -> bool:
+        """Удалить владельца"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("DELETE FROM owners WHERE telegram_user_id = ?", (telegram_user_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Ошибка удаления владельца: {e}")
+            conn.close()
+            return False
+
+    def is_owner(self, telegram_user_id: int) -> bool:
+        """Проверить является ли пользователь владельцем"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("SELECT id FROM owners WHERE telegram_user_id = ? AND is_active = 1", (telegram_user_id,))
+            result = cursor.fetchone()
+            conn.close()
+            return result is not None
+        except Exception as e:
+            print(f"Ошибка проверки владельца: {e}")
+            conn.close()
+            return False
+
+    def get_all_owners(self) -> List[Dict]:
+        """Получить всех владельцев"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("SELECT id, telegram_user_id, added_by, created_at, is_active FROM owners ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    'id': row[0],
+                    'telegram_user_id': row[1],
+                    'added_by': row[2],
+                    'created_at': row[3],
+                    'is_active': bool(row[4])
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения владельцев: {e}")
+            conn.close()
+            return []
     
     def get_all_admins(self) -> List[Dict]:
         """Получить список всех админов"""
