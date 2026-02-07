@@ -6404,7 +6404,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     state = get_user_state(user_id)
     
     # Проверка авторизации
-    if not db.is_admin(user_id) and not state.employee_mode and not state.limited_access:
+    if not db.is_admin(user_id) and not state.employee_mode and not state.owner_mode and not state.limited_access:
         await query.answer("🔒 Доступ запрещён", show_alert=True)
         return
     
