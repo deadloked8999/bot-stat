@@ -243,7 +243,7 @@ def get_employee_menu_keyboard():
 def get_owner_menu_keyboard():
     """Клавиатура для владельцев (ограниченный доступ)"""
     keyboard = [
-        ['📊 ОТЧЁТ', '💵 ЗП'],
+        ['💵 ЗП'],
         ['🚪 ВЫХОД']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
