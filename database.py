@@ -29,6 +29,19 @@ class Database:
             return 'СБ'
         return code
     
+    @staticmethod
+    def safe_float(value):
+        """Безопасная конвертация Decimal/любого числа в float для SQLite"""
+        if value is None:
+            return None
+        try:
+            from decimal import Decimal
+            if isinstance(value, Decimal):
+                return float(value)
+            return float(value) if value else None
+        except (ValueError, TypeError):
+            return None
+    
     def init_database(self):
         """Инициализация базы данных"""
         conn = self.get_connection()
@@ -2629,7 +2642,7 @@ class Database:
                 cursor.execute("""
                     INSERT INTO expense_records (file_id, expense_item, amount, is_total)
                     VALUES (?, ?, ?, ?)
-                """, (file_id, record.get('expense_item'), record.get('amount'),
+                """, (file_id, record.get('expense_item'), self.safe_float(record.get('amount')),
                       1 if record.get('is_total') else 0))
             
             conn.commit()
@@ -2702,8 +2715,8 @@ class Database:
                     INSERT INTO cash_collection 
                     (file_id, currency_label, quantity, exchange_rate, amount, is_total)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (file_id, record.get('currency_label'), record.get('quantity'),
-                      record.get('exchange_rate'), record.get('amount'),
+                """, (file_id, record.get('currency_label'), self.safe_float(record.get('quantity')),
+                      self.safe_float(record.get('exchange_rate')), self.safe_float(record.get('amount')),
                       1 if record.get('is_total') else 0))
             
             conn.commit()
@@ -2726,7 +2739,7 @@ class Database:
                 cursor.execute("""
                     INSERT INTO staff_debts (file_id, debt_type, amount, is_total)
                     VALUES (?, ?, ?, ?)
-                """, (file_id, record.get('debt_type'), record.get('amount'),
+                """, (file_id, record.get('debt_type'), self.safe_float(record.get('amount')),
                       1 if record.get('is_total') else 0))
             
             conn.commit()
@@ -2751,7 +2764,7 @@ class Database:
                     (file_id, category, entry_text, is_total, amount)
                     VALUES (?, ?, ?, ?, ?)
                 """, (file_id, record.get('category'), record.get('entry_text'),
-                      1 if record.get('is_total') else 0, record.get('amount')))
+                      1 if record.get('is_total') else 0, self.safe_float(record.get('amount'))))
             
             conn.commit()
             conn.close()
@@ -2774,8 +2787,8 @@ class Database:
                     INSERT INTO totals_summary 
                     (file_id, payment_type, income_amount, expense_amount, net_profit)
                     VALUES (?, ?, ?, ?, ?)
-                """, (file_id, record.get('payment_type'), record.get('income_amount'),
-                      record.get('expense_amount'), record.get('net_profit')))
+                """, (file_id, record.get('payment_type'), self.safe_float(record.get('income_amount')),
+                      self.safe_float(record.get('expense_amount')), self.safe_float(record.get('net_profit'))))
             
             conn.commit()
             conn.close()
