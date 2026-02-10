@@ -2533,13 +2533,27 @@ class Database:
         cursor = conn.cursor()
         
         try:
+            from decimal import Decimal
             for record in records:
+                # Конвертируем Decimal в float для SQLite
+                price_value = record.get('price_value')
+                if price_value is not None and isinstance(price_value, Decimal):
+                    price_value = float(price_value)
+                
+                quantity = record.get('quantity')
+                if quantity is not None and isinstance(quantity, Decimal):
+                    quantity = float(quantity)
+                
+                amount = record.get('amount')
+                if amount is not None and isinstance(amount, Decimal):
+                    amount = float(amount)
+                
                 cursor.execute("""
                     INSERT INTO ticket_sales 
                     (file_id, price_label, price_value, quantity, amount, is_total)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (file_id, record.get('price_label'), record.get('price_value'),
-                      record.get('quantity'), record.get('amount'), 
+                """, (file_id, record.get('price_label'), price_value,
+                      quantity, amount, 
                       1 if record.get('is_total') else 0))
             
             conn.commit()
