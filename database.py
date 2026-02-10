@@ -2754,4 +2754,355 @@ class Database:
         except Exception as e:
             print(f"Ошибка сохранения итогового баланса: {e}")
             conn.close()
+    
+    # ============================================
+    # ФУНКЦИИ ДЛЯ ПОЛУЧЕНИЯ ДАННЫХ ИТОГОВОГО ЛИСТА
+    # ============================================
+    
+    def get_files_by_period(self, start_date: str, end_date: str, club_name: str):
+        """Получить все файлы за период для клуба"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT *
+                FROM report_files
+                WHERE report_date >= ? AND report_date <= ? AND club_name = ?
+                ORDER BY report_date ASC
+            """, (start_date, end_date, club_name))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения файлов за период: {e}")
+            conn.close()
+            return []
+    
+    def list_income_records(self, file_id: int):
+        """Получение данных блока «Доходы» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT category, amount, created_at
+                FROM income_records
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения доходов: {e}")
+            conn.close()
+            return []
+    
+    def list_ticket_sales(self, file_id: int):
+        """Получение данных блока «Входные билеты» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT price_label, price_value, quantity, amount, is_total, created_at
+                FROM ticket_sales
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения билетов: {e}")
+            conn.close()
+            return []
+    
+    def list_payment_types_report(self, file_id: int):
+        """Получение данных блока «Типы оплат» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT payment_type, amount, is_total, is_cash_total, created_at
+                FROM payment_types_report
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения типов оплат: {e}")
+            conn.close()
+            return []
+    
+    def list_staff_statistics(self, file_id: int):
+        """Получение данных блока «Статистика персонала» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT role_name, staff_count, created_at
+                FROM staff_statistics
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения статистики персонала: {e}")
+            conn.close()
+            return []
+    
+    def list_expense_records(self, file_id: int):
+        """Получение данных блока «Расходы» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT expense_item, amount, is_total, created_at
+                FROM expense_records
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения расходов: {e}")
+            conn.close()
+            return []
+    
+    def list_misc_expenses_records(self, file_id: int):
+        """Получение данных блока «Прочие расходы» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT expense_item, amount, is_total, created_at
+                FROM misc_expenses_records
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения прочих расходов: {e}")
+            conn.close()
+            return []
+    
+    def get_misc_expenses_period(self, club_name: str, start_date: str, end_date: str):
+        """Получение данных блока «Прочие расходы» за период с группировкой"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT 
+                    mer.expense_item,
+                    SUM(mer.amount) as total_amount
+                FROM misc_expenses_records mer
+                JOIN report_files uf ON mer.file_id = uf.id
+                WHERE uf.club_name = ?
+                AND uf.report_date >= ?
+                AND uf.report_date <= ?
+                AND mer.is_total = 0
+                GROUP BY mer.expense_item
+                ORDER BY mer.expense_item
+            """, (club_name, start_date, end_date))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения прочих расходов за период: {e}")
+            conn.close()
+            return []
+    
+    def get_taxi_expenses_period(self, club_name: str, start_date: str, end_date: str):
+        """Получение данных блока «ТАКСИ» за период"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT 
+                    COALESCE(SUM(taxi_amount), 0) as total_taxi_amount,
+                    COALESCE(SUM(taxi_percent_amount), 0) as total_taxi_percent_amount,
+                    COALESCE(SUM(deposits_total), 0) as total_deposits_total,
+                    COALESCE(SUM(total_amount), 0) as total_amount
+                FROM taxi_expenses te
+                JOIN report_files uf ON te.file_id = uf.id
+                WHERE uf.club_name = ?
+                AND uf.report_date >= ?
+                AND uf.report_date <= ?
+            """, (club_name, start_date, end_date))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return {
+                    'total_taxi_amount': row[0],
+                    'total_taxi_percent_amount': row[1],
+                    'total_deposits_total': row[2],
+                    'total_amount': row[3]
+                }
+            return {
+                'total_taxi_amount': 0.0,
+                'total_taxi_percent_amount': 0.0,
+                'total_deposits_total': 0.0,
+                'total_amount': 0.0
+            }
+        except Exception as e:
+            print(f"Ошибка получения данных такси за период: {e}")
+            conn.close()
+            return {}
+    
+    def list_cash_collection(self, file_id: int):
+        """Получение данных блока «Инкассация» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT currency_label, quantity, exchange_rate, amount, is_total, created_at
+                FROM cash_collection
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения инкассации: {e}")
+            conn.close()
+            return []
+    
+    def list_staff_debts(self, file_id: int):
+        """Получение данных блока «Долги по персоналу» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT debt_type, amount, is_total, created_at
+                FROM staff_debts
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения долгов персонала: {e}")
+            conn.close()
+            return []
+    
+    def list_notes_entries(self, file_id: int):
+        """Получение данных блока «Примечание» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT category, entry_text, is_total, amount, created_at
+                FROM notes_entries
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения примечаний: {e}")
+            conn.close()
+            return []
+    
+    def list_totals_summary(self, file_id: int):
+        """Получение данных блока «Итого» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT payment_type, income_amount, expense_amount, net_profit, created_at
+                FROM totals_summary
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения итогов: {e}")
+            conn.close()
+            return []
 
