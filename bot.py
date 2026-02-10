@@ -2358,122 +2358,166 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.final_report_date = date_str
             state.final_report_file_id = file_id
             
-            # Получаем данные всех блоков и формируем текстовое сообщение
+            # Получаем данные всех блоков
+            # 1. Доходы
+            income_records = db.list_income_records(file_id)
+            income_total = 0
+            if income_records:
+                total_record = next((r for r in income_records if 'итого' in str(r.get('category', '')).lower()), None)
+                if total_record:
+                    income_total = decimal_to_float(total_record['amount'])
+                else:
+                    income_total = sum(decimal_to_float(r['amount']) for r in income_records)
+            
+            # 2. Входные билеты
+            ticket_records = db.list_ticket_sales(file_id)
+            ticket_total = 0
+            if ticket_records:
+                total_record = next((r for r in ticket_records if r.get('is_total') == 1), None)
+                if total_record:
+                    ticket_total = decimal_to_float(total_record['amount'])
+                else:
+                    ticket_total = sum(decimal_to_float(r['amount']) for r in ticket_records if not r.get('is_total'))
+            
+            # 3. Типы оплат
+            payment_records = db.list_payment_types_report(file_id)
+            payment_total = 0
+            if payment_records:
+                total_record = next((r for r in payment_records if r.get('is_total') == 1), None)
+                if total_record:
+                    payment_total = decimal_to_float(total_record['amount'])
+                else:
+                    payment_total = sum(decimal_to_float(r['amount']) for r in payment_records if not r.get('is_total'))
+            
+            # 4. Персонал
+            staff_records = db.list_staff_statistics(file_id)
+            staff_total = 0
+            if staff_records:
+                staff_total = sum(r['staff_count'] for r in staff_records)
+            
+            # 5. Расходы
+            expense_records = db.list_expense_records(file_id)
+            expense_total = 0
+            if expense_records:
+                total_record = next((r for r in expense_records if r.get('is_total') == 1), None)
+                if total_record:
+                    expense_total = decimal_to_float(total_record['amount'])
+                else:
+                    expense_total = sum(decimal_to_float(r['amount']) for r in expense_records if not r.get('is_total'))
+            
+            # 6. Прочие расходы
+            misc_records = db.list_misc_expenses_records(file_id)
+            misc_total = 0
+            if misc_records:
+                total_record = next((r for r in misc_records if r.get('is_total') == 1), None)
+                if total_record:
+                    misc_total = decimal_to_float(total_record['amount'])
+                else:
+                    misc_total = sum(decimal_to_float(r['amount']) for r in misc_records if not r.get('is_total'))
+            
+            # 7. Такси
+            taxi_records = db.list_taxi_expenses(file_id)
+            taxi_total = 0
+            if taxi_records:
+                taxi_total = sum(decimal_to_float(r['total_amount']) for r in taxi_records)
+            
+            # 8. Инкассация
+            cash_records = db.list_cash_collection(file_id)
+            cash_total = 0
+            if cash_records:
+                total_record = next((r for r in cash_records if r.get('is_total') == 1), None)
+                if total_record:
+                    cash_total = decimal_to_float(total_record['amount'])
+                else:
+                    cash_total = sum(decimal_to_float(r['amount']) for r in cash_records if not r.get('is_total'))
+            
+            # 9. Долги персонала
+            debt_records = db.list_staff_debts(file_id)
+            debt_total = 0
+            if debt_records:
+                total_record = next((r for r in debt_records if r.get('is_total') == 1), None)
+                if total_record:
+                    debt_total = decimal_to_float(total_record['amount'])
+                else:
+                    debt_total = sum(decimal_to_float(r['amount']) for r in debt_records if not r.get('is_total'))
+            
+            # 10. Примечания
+            note_records = db.list_notes_entries(file_id)
+            
+            # 11. Итого
+            total_records = db.list_totals_summary(file_id)
+            
+            # Формируем инлайн-клавиатуру с блоками
+            keyboard = []
+            
+            # Первый ряд: Доходы, Билеты
+            row1 = []
+            if income_total > 0:
+                row1.append(InlineKeyboardButton(f"💰 Доходы: {income_total:.0f}", callback_data="final_block_income"))
+            if ticket_total > 0:
+                row1.append(InlineKeyboardButton(f"🎟 Билеты: {ticket_total:.0f}", callback_data="final_block_tickets"))
+            if row1:
+                keyboard.append(row1)
+            
+            # Второй ряд: Типы оплат, Персонал
+            row2 = []
+            if payment_total > 0:
+                row2.append(InlineKeyboardButton(f"💳 Оплаты: {payment_total:.0f}", callback_data="final_block_payments"))
+            if staff_total > 0:
+                row2.append(InlineKeyboardButton(f"👥 Персонал: {staff_total}", callback_data="final_block_staff"))
+            if row2:
+                keyboard.append(row2)
+            
+            # Третий ряд: Расходы, Инкассация
+            row3 = []
+            if expense_total > 0:
+                row3.append(InlineKeyboardButton(f"💸 Расходы: {expense_total:.0f}", callback_data="final_block_expenses"))
+            if cash_total > 0:
+                row3.append(InlineKeyboardButton(f"🏦 Инкассация: {cash_total:.0f}", callback_data="final_block_cash"))
+            if row3:
+                keyboard.append(row3)
+            
+            # Четвёртый ряд: Долги, Прочие расходы
+            row4 = []
+            if debt_total > 0:
+                row4.append(InlineKeyboardButton(f"📌 Долги: {debt_total:.0f}", callback_data="final_block_debts"))
+            if misc_total > 0:
+                row4.append(InlineKeyboardButton(f"📝 Прочие: {misc_total:.0f}", callback_data="final_block_misc"))
+            if row4:
+                keyboard.append(row4)
+            
+            # Пятый ряд: Такси, Примечания
+            row5 = []
+            if taxi_total > 0:
+                row5.append(InlineKeyboardButton(f"🚕 Такси: {taxi_total:.0f}", callback_data="final_block_taxi"))
+            if note_records:
+                row5.append(InlineKeyboardButton(f"📋 Примечания: {len(note_records)}", callback_data="final_block_notes"))
+            if row5:
+                keyboard.append(row5)
+            
+            # Последний ряд: ПОДРОБНЕЕ
+            keyboard.append([InlineKeyboardButton("📄 ПОДРОБНЕЕ (Excel)", callback_data="final_details")])
+            
+            # Формируем текстовое сообщение с итогами
             summary_lines = []
             summary_lines.append(f"📅 Дата: {date_str}")
             summary_lines.append(f"🏢 Клуб: {club_name}\n")
             
-            # 1. Доходы
-            income_records = db.list_income_records(file_id)
-            if income_records:
-                # Ищем запись "Итого" (is_total не используется в income_records, ищем по тексту)
-                total_record = next((r for r in income_records if 'итого' in str(r.get('category', '')).lower()), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все
-                    total = sum(decimal_to_float(r['amount']) for r in income_records)
-                summary_lines.append(f"💰 Доходы: {total:,.0f}")
-            
-            # 2. Входные билеты
-            ticket_records = db.list_ticket_sales(file_id)
-            if ticket_records:
-                # Ищем запись с is_total = 1
-                total_record = next((r for r in ticket_records if r.get('is_total') == 1), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все НЕ-итоговые
-                    total = sum(decimal_to_float(r['amount']) for r in ticket_records if not r.get('is_total'))
-                summary_lines.append(f"🎟 Входные билеты: {total:,.0f}")
-            
-            # 3. Типы оплат
-            payment_records = db.list_payment_types_report(file_id)
-            if payment_records:
-                # Ищем запись с is_total = 1
-                total_record = next((r for r in payment_records if r.get('is_total') == 1), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все НЕ-итоговые
-                    total = sum(decimal_to_float(r['amount']) for r in payment_records if not r.get('is_total'))
-                summary_lines.append(f"💳 Типы оплат: {total:,.0f}")
-            
-            # 4. Персонал
-            staff_records = db.list_staff_statistics(file_id)
-            if staff_records:
-                total = sum(r['staff_count'] for r in staff_records)
-                summary_lines.append(f"👥 Персонал: {total} человек")
-            
-            # 5. Расходы
-            expense_records = db.list_expense_records(file_id)
-            if expense_records:
-                # Ищем запись с is_total = 1
-                total_record = next((r for r in expense_records if r.get('is_total') == 1), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все НЕ-итоговые
-                    total = sum(decimal_to_float(r['amount']) for r in expense_records if not r.get('is_total'))
-                summary_lines.append(f"💸 Расходы: {total:,.0f}")
-            
-            # 6. Прочие расходы
-            misc_records = db.list_misc_expenses_records(file_id)
-            if misc_records:
-                # Ищем запись с is_total = 1
-                total_record = next((r for r in misc_records if r.get('is_total') == 1), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все НЕ-итоговые
-                    total = sum(decimal_to_float(r['amount']) for r in misc_records if not r.get('is_total'))
-                summary_lines.append(f"📝 Прочие расходы: {total:,.0f}")
-            
-            # 7. Такси
-            taxi_records = db.list_taxi_expenses(file_id)
-            if taxi_records:
-                # Такси обычно одна запись с total_amount
-                total = sum(decimal_to_float(r['total_amount']) for r in taxi_records)
-                summary_lines.append(f"🚕 Такси: {total:,.0f}")
-            
-            # 8. Инкассация
-            cash_records = db.list_cash_collection(file_id)
-            if cash_records:
-                # Ищем запись с is_total = 1
-                total_record = next((r for r in cash_records if r.get('is_total') == 1), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все НЕ-итоговые
-                    total = sum(decimal_to_float(r['amount']) for r in cash_records if not r.get('is_total'))
-                summary_lines.append(f"🏦 Инкассация: {total:,.0f}")
-            
-            # 9. Долги персонала
-            debt_records = db.list_staff_debts(file_id)
-            if debt_records:
-                # Ищем запись с is_total = 1
-                total_record = next((r for r in debt_records if r.get('is_total') == 1), None)
-                if total_record:
-                    total = decimal_to_float(total_record['amount'])
-                else:
-                    # Если нет записи "Итого", суммируем все НЕ-итоговые
-                    total = sum(decimal_to_float(r['amount']) for r in debt_records if not r.get('is_total'))
-                summary_lines.append(f"📌 Долги персонала: {total:,.0f}")
-            
-            # 10. Примечания
-            note_records = db.list_notes_entries(file_id)
-            if note_records:
-                summary_lines.append(f"📋 Примечания: {len(note_records)} записей")
-            
-            # 11. Итого
-            total_records = db.list_totals_summary(file_id)
+            # Добавляем итоги (НАЛ, Б/Н, Итого)
             if total_records:
                 for rec in total_records:
                     profit = decimal_to_float(rec['net_profit'])
-                    summary_lines.append(f"📊 Итого ({rec['payment_type']}): Прибыль {profit:,.0f}")
-            
-            # Кнопка "ПОДРОБНЕЕ"
-            keyboard = [[InlineKeyboardButton("📄 ПОДРОБНЕЕ", callback_data="final_details")]]
+                    payment_type = rec['payment_type']
+                    
+                    # Меняем названия
+                    if 'нал' in payment_type.lower() and 'безнал' not in payment_type.lower() and 'б/н' not in payment_type.lower():
+                        summary_lines.append(f"💵 НАЛ: {profit:.0f}")
+                    elif 'б/н' in payment_type.lower() or 'безнал' in payment_type.lower():
+                        summary_lines.append(f"💳 Б/Н: {profit:.0f}")
+                    elif 'итого' in payment_type.lower():
+                        summary_lines.append(f"📊 Итого прибыль: {profit:.0f}")
+                    else:
+                        summary_lines.append(f"📊 {payment_type}: {profit:.0f}")
             
             await update.message.reply_text(
                 "\n".join(summary_lines),
@@ -8623,6 +8667,296 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             caption=f"📋 ПОЛНЫЙ ОТЧЁТ\n📅 Дата: {date_str}\n🏢 Клуб: {club_name}\n📊 Блоков: {len(all_blocks)}"
         )
         await query.answer("✅ Отчёт отправлен")
+    
+    # ============================================
+    # ОБРАБОТЧИКИ БЛОКОВ ИТОГОВОГО ОТЧЁТА
+    # ============================================
+    
+    elif query.data == 'final_block_income':
+        # Блок "Доходы"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        income_records = db.list_income_records(file_id)
+        if not income_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"💰 ДОХОДЫ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in income_records:
+            amount = decimal_to_float(rec['amount'])
+            lines.append(f"• {rec['category']}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_tickets':
+        # Блок "Входные билеты"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        ticket_records = db.list_ticket_sales(file_id)
+        if not ticket_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"🎟 ВХОДНЫЕ БИЛЕТЫ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in ticket_records:
+            price_label = rec.get('price_label', '')
+            quantity = rec.get('quantity', 0)
+            amount = decimal_to_float(rec['amount'])
+            if rec.get('is_total') == 1:
+                lines.append(f"─────────────")
+                lines.append(f"📊 Итого: {amount:.0f}")
+            else:
+                lines.append(f"• {price_label} x {quantity} = {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_payments':
+        # Блок "Типы оплат"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        payment_records = db.list_payment_types_report(file_id)
+        if not payment_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"💳 ТИПЫ ОПЛАТ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in payment_records:
+            payment_type = rec['payment_type']
+            amount = decimal_to_float(rec['amount'])
+            if rec.get('is_total') == 1:
+                lines.append(f"─────────────")
+                lines.append(f"📊 Итого: {amount:.0f}")
+            else:
+                lines.append(f"• {payment_type}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_staff':
+        # Блок "Персонал"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        staff_records = db.list_staff_statistics(file_id)
+        if not staff_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"👥 ПЕРСОНАЛ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        total = 0
+        for rec in staff_records:
+            role_name = rec['role_name']
+            staff_count = rec['staff_count']
+            lines.append(f"• {role_name}: {staff_count} чел.")
+            total += staff_count
+        lines.append(f"─────────────")
+        lines.append(f"📊 Всего: {total} человек")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_expenses':
+        # Блок "Расходы"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        expense_records = db.list_expense_records(file_id)
+        if not expense_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"💸 РАСХОДЫ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in expense_records:
+            expense_item = rec['expense_item']
+            amount = decimal_to_float(rec['amount'])
+            if rec.get('is_total') == 1:
+                lines.append(f"─────────────")
+                lines.append(f"📊 Итого: {amount:.0f}")
+            else:
+                lines.append(f"• {expense_item}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_cash':
+        # Блок "Инкассация"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        cash_records = db.list_cash_collection(file_id)
+        if not cash_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"🏦 ИНКАССАЦИЯ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in cash_records:
+            currency_label = rec['currency_label']
+            quantity = rec.get('quantity', 0)
+            amount = decimal_to_float(rec['amount'])
+            if rec.get('is_total') == 1:
+                lines.append(f"─────────────")
+                lines.append(f"📊 Итого: {amount:.0f}")
+            else:
+                if quantity > 0:
+                    lines.append(f"• {currency_label} x {quantity} = {amount:.0f}")
+                else:
+                    lines.append(f"• {currency_label}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_debts':
+        # Блок "Долги персонала"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        debt_records = db.list_staff_debts(file_id)
+        if not debt_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"📌 ДОЛГИ ПЕРСОНАЛА", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in debt_records:
+            debt_type = rec['debt_type']
+            amount = decimal_to_float(rec['amount'])
+            if rec.get('is_total') == 1:
+                lines.append(f"─────────────")
+                lines.append(f"📊 Итого: {amount:.0f}")
+            else:
+                lines.append(f"• {debt_type}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_misc':
+        # Блок "Прочие расходы"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        misc_records = db.list_misc_expenses_records(file_id)
+        if not misc_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"📝 ПРОЧИЕ РАСХОДЫ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in misc_records:
+            expense_item = rec['expense_item']
+            amount = decimal_to_float(rec['amount'])
+            if rec.get('is_total') == 1:
+                lines.append(f"─────────────")
+                lines.append(f"📊 Итого: {amount:.0f}")
+            else:
+                lines.append(f"• {expense_item}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_taxi':
+        # Блок "Такси"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        taxi_records = db.list_taxi_expenses(file_id)
+        if not taxi_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"🚕 ТАКСИ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in taxi_records:
+            taxi_amount = decimal_to_float(rec.get('taxi_amount', 0))
+            taxi_percent = decimal_to_float(rec.get('taxi_percent_amount', 0))
+            deposits = decimal_to_float(rec.get('deposits_total', 0))
+            total = decimal_to_float(rec['total_amount'])
+            
+            lines.append(f"• Такси: {taxi_amount:.0f}")
+            if taxi_percent > 0:
+                lines.append(f"• Такси %: {taxi_percent:.0f}")
+            if deposits > 0:
+                lines.append(f"• Залоги: {deposits:.0f}")
+            lines.append(f"─────────────")
+            lines.append(f"📊 Итого: {total:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_block_notes':
+        # Блок "Примечания"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        note_records = db.list_notes_entries(file_id)
+        if not note_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        lines = [f"📋 ПРИМЕЧАНИЯ", f"📅 Дата: {date_str}", f"🏢 Клуб: {club_name}\n"]
+        for rec in note_records:
+            category = rec['category']
+            entry_text = rec['entry_text']
+            amount = rec.get('amount')
+            
+            if amount and decimal_to_float(amount) > 0:
+                lines.append(f"• [{category}] {entry_text}: {decimal_to_float(amount):.0f}")
+            else:
+                lines.append(f"• [{category}] {entry_text}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
     
     # ============================================
     # ОБРАБОТЧИКИ БЛОКОВ ИТОГОВОГО ОТЧЁТА
