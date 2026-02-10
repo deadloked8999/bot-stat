@@ -681,6 +681,146 @@ async def send_salary_notifications(bot, uploaded_payments: List[Dict], club: st
 db = Database()
 
 
+# ============================================
+# КОНСТАНТЫ ДЛЯ ПАРСИНГА ДАТ
+# ============================================
+DATE_FORMATS = ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"]
+
+
+# ============================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С ДАТАМИ
+# ============================================
+
+def parse_period_from_text(text: str):
+    """Парсинг периода из текста типа '1.11-5.12' или '1,11-5,12'"""
+    try:
+        current_year = datetime.now().year
+        
+        # Заменяем запятые на точки и убираем пробелы
+        text = text.replace(',', '.').replace(' ', '')
+        
+        # Разделяем по дефису
+        if '-' not in text:
+            return None
+        
+        parts = text.split('-')
+        if len(parts) != 2:
+            return None
+        
+        start_str, end_str = parts
+        
+        # Парсим начальную дату
+        if '.' in start_str:
+            start_parts = start_str.split('.')
+            if len(start_parts) == 2:
+                start_day, start_month = int(start_parts[0]), int(start_parts[1])
+                start_date = date(current_year, start_month, start_day)
+            else:
+                return None
+        else:
+            return None
+        
+        # Парсим конечную дату
+        if '.' in end_str:
+            end_parts = end_str.split('.')
+            if len(end_parts) == 2:
+                end_day, end_month = int(end_parts[0]), int(end_parts[1])
+                end_date = date(current_year, end_month, end_day)
+            else:
+                return None
+        else:
+            return None
+        
+        # Проверяем корректность периода
+        if start_date > end_date:
+            return None
+        
+        return (start_date, end_date)
+    
+    except Exception as e:
+        print(f"Error parsing period: {e}")
+        return None
+
+
+def parse_report_date_from_text(text: str):
+    """Парсинг даты из текста"""
+    if not text:
+        return None
+    
+    cleaned = text.strip()
+    
+    # Проверяем короткий формат: 1.11 или 1,11 (день.месяц без года)
+    short_pattern = r'^(\d{1,2})[.,/](\d{1,2})$'
+    match = re.match(short_pattern, cleaned)
+    if match:
+        day = int(match.group(1))
+        month = int(match.group(2))
+        current_year = datetime.now().year
+        try:
+            return date(current_year, month, day)
+        except ValueError:
+            pass
+    
+    # Пробуем стандартные форматы
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    
+    # Попробуем найти дату в тексте
+    tokens = re.findall(r"\d{1,4}[\.\-/,]\d{1,2}(?:[\.\-/,]\d{1,4})?", cleaned)
+    for token in tokens:
+        # Сначала пробуем короткий формат
+        short_match = re.match(short_pattern, token)
+        if short_match:
+            day = int(short_match.group(1))
+            month = int(short_match.group(2))
+            current_year = datetime.now().year
+            try:
+                return date(current_year, month, day)
+            except ValueError:
+                continue
+        
+        # Потом полные форматы
+        for fmt in DATE_FORMATS:
+            try:
+                return datetime.strptime(token, fmt).date()
+            except ValueError:
+                continue
+    
+    return None
+
+
+def format_report_date(d: date) -> str:
+    """Форматирование даты в строку DD.MM.YYYY"""
+    return d.strftime("%d.%m.%Y")
+
+
+def decimal_to_str(value) -> str:
+    """Конвертация Decimal в строку без дробной части"""
+    if value is None:
+        return "—"
+    if isinstance(value, Decimal):
+        return format(value, '0.0f')
+    try:
+        return format(Decimal(str(value)), '0.0f')
+    except Exception:
+        return str(value)
+
+
+def decimal_to_float(value):
+    """Конвертация Decimal в float"""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка команды /start и старт"""
     user_id = update.effective_user.id
