@@ -2366,19 +2366,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 1. Доходы
             income_records = db.list_income_records(file_id)
             if income_records:
-                total = sum(decimal_to_float(r['amount']) for r in income_records)
+                # Ищем запись "Итого" (is_total не используется в income_records, ищем по тексту)
+                total_record = next((r for r in income_records if 'итого' in str(r.get('category', '')).lower()), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все
+                    total = sum(decimal_to_float(r['amount']) for r in income_records)
                 summary_lines.append(f"💰 Доходы: {total:,.0f}")
             
             # 2. Входные билеты
             ticket_records = db.list_ticket_sales(file_id)
             if ticket_records:
-                total = sum(decimal_to_float(r['amount']) for r in ticket_records)
+                # Ищем запись с is_total = 1
+                total_record = next((r for r in ticket_records if r.get('is_total') == 1), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все НЕ-итоговые
+                    total = sum(decimal_to_float(r['amount']) for r in ticket_records if not r.get('is_total'))
                 summary_lines.append(f"🎟 Входные билеты: {total:,.0f}")
             
             # 3. Типы оплат
             payment_records = db.list_payment_types_report(file_id)
             if payment_records:
-                total = sum(decimal_to_float(r['amount']) for r in payment_records)
+                # Ищем запись с is_total = 1
+                total_record = next((r for r in payment_records if r.get('is_total') == 1), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все НЕ-итоговые
+                    total = sum(decimal_to_float(r['amount']) for r in payment_records if not r.get('is_total'))
                 summary_lines.append(f"💳 Типы оплат: {total:,.0f}")
             
             # 4. Персонал
@@ -2390,31 +2408,56 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 5. Расходы
             expense_records = db.list_expense_records(file_id)
             if expense_records:
-                total = sum(decimal_to_float(r['amount']) for r in expense_records)
+                # Ищем запись с is_total = 1
+                total_record = next((r for r in expense_records if r.get('is_total') == 1), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все НЕ-итоговые
+                    total = sum(decimal_to_float(r['amount']) for r in expense_records if not r.get('is_total'))
                 summary_lines.append(f"💸 Расходы: {total:,.0f}")
             
             # 6. Прочие расходы
             misc_records = db.list_misc_expenses_records(file_id)
             if misc_records:
-                total = sum(decimal_to_float(r['amount']) for r in misc_records)
+                # Ищем запись с is_total = 1
+                total_record = next((r for r in misc_records if r.get('is_total') == 1), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все НЕ-итоговые
+                    total = sum(decimal_to_float(r['amount']) for r in misc_records if not r.get('is_total'))
                 summary_lines.append(f"📝 Прочие расходы: {total:,.0f}")
             
             # 7. Такси
             taxi_records = db.list_taxi_expenses(file_id)
             if taxi_records:
+                # Такси обычно одна запись с total_amount
                 total = sum(decimal_to_float(r['total_amount']) for r in taxi_records)
                 summary_lines.append(f"🚕 Такси: {total:,.0f}")
             
             # 8. Инкассация
             cash_records = db.list_cash_collection(file_id)
             if cash_records:
-                total = sum(decimal_to_float(r['amount']) for r in cash_records)
+                # Ищем запись с is_total = 1
+                total_record = next((r for r in cash_records if r.get('is_total') == 1), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все НЕ-итоговые
+                    total = sum(decimal_to_float(r['amount']) for r in cash_records if not r.get('is_total'))
                 summary_lines.append(f"🏦 Инкассация: {total:,.0f}")
             
             # 9. Долги персонала
             debt_records = db.list_staff_debts(file_id)
             if debt_records:
-                total = sum(decimal_to_float(r['amount']) for r in debt_records)
+                # Ищем запись с is_total = 1
+                total_record = next((r for r in debt_records if r.get('is_total') == 1), None)
+                if total_record:
+                    total = decimal_to_float(total_record['amount'])
+                else:
+                    # Если нет записи "Итого", суммируем все НЕ-итоговые
+                    total = sum(decimal_to_float(r['amount']) for r in debt_records if not r.get('is_total'))
                 summary_lines.append(f"📌 Долги персонала: {total:,.0f}")
             
             # 10. Примечания
