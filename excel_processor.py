@@ -1326,12 +1326,12 @@ class ExcelProcessor:
             'extra': extra_notes
         }
 
-    def extract_misc_expenses_from_notes_after_total(self, file_content: bytes) -> Optional[str]:
+    def extract_misc_expenses_from_notes_after_total(self, file_content: bytes) -> Dict[str, Any]:
         """
         Извлечение блока «Прочие расходы» из примечаний в колонке безнал после первого ИТОГО
         
         Returns:
-            str: Текст прочих расходов (от "ПРОЧИЕ РАСХОДЫ" до следующего "ИТОГО") или None
+            Dict[str, Any]: Словарь с ключами 'records' (список записей) и 'reported_total' (итого) или пустой словарь
         """
         try:
             df = pd.read_excel(io.BytesIO(file_content), sheet_name=0, header=None, engine='openpyxl')
