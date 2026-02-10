@@ -152,6 +152,12 @@ class UserState:
         self.stylist_view_from: Optional[str] = None
         self.stylist_view_to: Optional[str] = None
         
+        # Для итоговых отчётов
+        self.final_report_date: Optional[str] = None
+        self.final_report_files: Optional[list] = None
+        self.final_report_file_id: Optional[int] = None
+        self.final_report_club: Optional[str] = None
+        
         # ID сообщений бота для удаления
         self.bot_messages: list = []
     
@@ -2295,6 +2301,93 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Например: 123456789"
             )
             return
+        
+        state.mode = None
+        return
+    
+    # Обработка ввода даты для итогового отчёта
+    if state.mode == 'awaiting_final_report_date':
+        if not db.is_admin(user_id):
+            await update.message.reply_text("🔒 Доступ запрещён")
+            state.mode = None
+            return
+        
+        # Парсим дату
+        parsed_date = parse_short_date(text.strip())
+        if not parsed_date:
+            await update.message.reply_text(
+                "❌ Неверный формат даты\n\n"
+                "Используйте:\n"
+                "• ДД.ММ.ГГ (например: 15.01.26)\n"
+                "• ДД,ММ,ГГ (например: 15,01,26)"
+            )
+            return
+        
+        # Ищем файлы за эту дату
+        files = db.get_files_by_date(parsed_date)
+        
+        if not files:
+            await update.message.reply_text(
+                f"❌ НЕТ ДАННЫХ\n\n"
+                f"За дату {format_report_date(parsed_date)} не найдено загруженных отчётов.\n\n"
+                f"Загрузите файл через кнопку 'ЗАГРУЗИТЬ ЗП'."
+            )
+            state.mode = None
+            return
+        
+        # Сохраняем дату и файлы в state
+        state.final_report_date = parsed_date
+        state.final_report_files = files
+        
+        # Если файлов несколько (разные клубы), показываем выбор клуба
+        if len(files) > 1:
+            keyboard = []
+            clubs_seen = set()
+            
+            for file in files:
+                club_name = file['club_name']
+                if club_name not in clubs_seen:
+                    clubs_seen.add(club_name)
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"🏢 {club_name}",
+                            callback_data=f"final_club_{club_name}"
+                        )
+                    ])
+            
+            await update.message.reply_text(
+                f"📅 Дата: {format_report_date(parsed_date)}\n\n"
+                f"Найдено отчётов: {len(files)}\n\n"
+                f"Выберите клуб:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Один файл - сразу показываем выбор блока
+            file = files[0]
+            state.final_report_file_id = file['id']
+            state.final_report_club = file['club_name']
+            
+            keyboard = [
+                [InlineKeyboardButton("💰 Доходы", callback_data="final_block_income")],
+                [InlineKeyboardButton("🎟 Входные билеты", callback_data="final_block_tickets")],
+                [InlineKeyboardButton("💳 Типы оплат", callback_data="final_block_payments")],
+                [InlineKeyboardButton("👥 Персонал", callback_data="final_block_staff")],
+                [InlineKeyboardButton("💸 Расходы", callback_data="final_block_expenses")],
+                [InlineKeyboardButton("📝 Прочие расходы", callback_data="final_block_misc")],
+                [InlineKeyboardButton("🚕 Такси", callback_data="final_block_taxi")],
+                [InlineKeyboardButton("🏦 Инкассация", callback_data="final_block_cash")],
+                [InlineKeyboardButton("📌 Долги персонала", callback_data="final_block_debts")],
+                [InlineKeyboardButton("📋 Примечания", callback_data="final_block_notes")],
+                [InlineKeyboardButton("📊 Итого", callback_data="final_block_totals")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="final_cancel")]
+            ]
+            
+            await update.message.reply_text(
+                f"📅 Дата: {format_report_date(parsed_date)}\n"
+                f"🏢 Клуб: {file['club_name']}\n\n"
+                f"Выберите блок для просмотра:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         
         state.mode = None
         return
