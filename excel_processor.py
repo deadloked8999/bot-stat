@@ -1492,12 +1492,73 @@ class ExcelProcessor:
 
         if not misc_expenses_lines:
             logger.info("No misc expenses data found")
-            return None
+            return {'records': [], 'reported_total': None}
 
-        misc_expenses_text = '\n'.join(misc_expenses_lines)
-        logger.info(f"Extracted misc expenses from notes ({len(misc_expenses_lines)} lines): {misc_expenses_text[:200]}")
+        # Парсим строки в записи
+        records: List[Dict[str, Any]] = []
+        reported_total = None
+        calculated_total = Decimal('0.00')
         
-        return misc_expenses_text
+        for line in misc_expenses_lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Пропускаем заголовок "ПРОЧИЕ РАСХОДЫ"
+            if 'прочие' in line.lower() and 'расход' in line.lower():
+                continue
+            
+            # Проверяем на ИТОГО
+            if 'итого' in line.lower():
+                # Пытаемся извлечь сумму из строки ИТОГО
+                number_pattern = r'\d+(?:[.,]\d+)*'
+                numbers = re.findall(number_pattern, line)
+                if numbers:
+                    try:
+                        total_str = numbers[-1].replace('.', '').replace(',', '.').replace(' ', '')
+                        reported_total = Decimal(total_str)
+                    except (ValueError, InvalidOperation):
+                        pass
+                continue
+            
+            # Парсим строку: ищем число и текст после него
+            # Формат: "число - текст" или "текст число"
+            number_pattern = r'\d+(?:[.,]\d+)*'
+            matches = list(re.finditer(number_pattern, line))
+            
+            if matches:
+                # Берём последнее число как сумму
+                last_match = matches[-1]
+                amount_str = last_match.group(0)
+                amount_str_clean = amount_str.replace('.', '').replace(',', '.').replace(' ', '')
+                
+                try:
+                    amount = Decimal(amount_str_clean)
+                    # Текст статьи - всё до последнего числа
+                    expense_item = line[:last_match.start()].strip()
+                    # Убираем дефисы и лишние символы
+                    expense_item = expense_item.rstrip('-').strip()
+                    
+                    if expense_item:
+                        records.append({
+                            'expense_item': expense_item,
+                            'amount': amount,
+                            'is_total': False
+                        })
+                        calculated_total += amount
+                except (ValueError, InvalidOperation):
+                    continue
+        
+        # Если reported_total не найден, используем calculated_total
+        if reported_total is None and calculated_total > 0:
+            reported_total = calculated_total
+        
+        logger.info(f"Extracted misc expenses: {len(records)} records, total={reported_total}")
+        
+        return {
+            'records': records,
+            'reported_total': float(reported_total) if reported_total else None
+        }
 
     def extract_totals_summary(self, file_content: bytes) -> List[Dict[str, Any]]:
         """Извлечение блока «Итоговый баланс» - горизонтальный формат"""
