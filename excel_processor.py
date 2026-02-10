@@ -1656,58 +1656,6 @@ class ExcelProcessor:
                             'item': expense_item
                         })
                         result['deposits_total'] += amount
-                
-                # Старый код для обратной совместимости (если нужно парсить из текста)
-                # Удаляем, так как теперь используем records
-                """
-                for line in misc_expenses_text.split('\n'):
-                    line = line.strip()
-                    if not line or line.lower().startswith('итого'):
-                        continue
-                    
-                    # Находим все числа с дефисом после них
-                    number_pattern = r'\d+(?:[.,]\d+)*'
-                    number_positions = []
-                    
-                    for match in re.finditer(number_pattern, line):
-                        start_pos = match.start()
-                        end_pos = match.end()
-                        number_str = match.group(0)
-                        number_positions.append((start_pos, end_pos, number_str))
-                    
-                    # Обрабатываем каждое число
-                    for i, (start_pos, end_pos, number_str) in enumerate(number_positions):
-                        after_number = line[end_pos:].lstrip()
-                        if not after_number.startswith('-'):
-                            continue
-                        
-                        dash_pos = end_pos + len(line[end_pos:]) - len(after_number)
-                        expense_end = len(line)
-                        
-                        # Ищем следующее число с дефисом
-                        for j in range(i + 1, len(number_positions)):
-                            next_start, next_end, next_number = number_positions[j]
-                            after_next = line[next_end:].lstrip()
-                            if after_next.startswith('-'):
-                                expense_end = next_start
-                                break
-                        
-                        expense_item = line[dash_pos + 1:expense_end].strip()
-                        
-                        # Проверяем, содержит ли статья слово "депозит"
-                        if 'депозит' in expense_item.lower():
-                            amount_clean = number_str.replace('.', '').replace(',', '').replace(' ', '')
-                            try:
-                                amount = Decimal(amount_clean)
-                                deposits.append({
-                                    'amount': amount,
-                                    'item': expense_item
-                                })
-                                result['deposits_total'] += amount
-                            except (ValueError, InvalidOperation):
-                                continue
-                
-                result['deposits'] = deposits
             
             # 2. Получаем блок расходов и ищем "ТАКСИ" и "% ТАКСИСТОВ"
             logger.info("Step 2: Extracting expense records to find TAXI and % TAXI...")
