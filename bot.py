@@ -2495,29 +2495,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if row5:
                 keyboard.append(row5)
             
+            # Добавляем итоги как кнопки (НАЛ, Б/Н, Итого прибыль)
+            if total_records:
+                nal_rec = None
+                bn_rec = None
+                itogo_rec = None
+                
+                for rec in total_records:
+                    payment_type = rec['payment_type'].lower()
+                    if 'нал' in payment_type and 'безнал' not in payment_type and 'б/н' not in payment_type:
+                        nal_rec = rec
+                    elif 'б/н' in payment_type or 'безнал' in payment_type:
+                        bn_rec = rec
+                    elif 'итого' in payment_type:
+                        itogo_rec = rec
+                
+                # Ряд с НАЛ и Б/Н
+                row_totals = []
+                if nal_rec:
+                    profit = decimal_to_float(nal_rec['net_profit'])
+                    row_totals.append(InlineKeyboardButton(f"💵 НАЛ: {profit:.0f}", callback_data="final_total_nal"))
+                if bn_rec:
+                    profit = decimal_to_float(bn_rec['net_profit'])
+                    row_totals.append(InlineKeyboardButton(f"💳 Б/Н: {profit:.0f}", callback_data="final_total_bn"))
+                if row_totals:
+                    keyboard.append(row_totals)
+                
+                # Ряд с Итого прибыль
+                if itogo_rec:
+                    profit = decimal_to_float(itogo_rec['net_profit'])
+                    keyboard.append([InlineKeyboardButton(f"📊 Итого прибыль: {profit:.0f}", callback_data="final_total_itogo")])
+            
             # Последний ряд: ПОДРОБНЕЕ
             keyboard.append([InlineKeyboardButton("📄 ПОДРОБНЕЕ (Excel)", callback_data="final_details")])
             
-            # Формируем текстовое сообщение с итогами
+            # Формируем текстовое сообщение (только дата и клуб)
             summary_lines = []
             summary_lines.append(f"📅 Дата: {date_str}")
-            summary_lines.append(f"🏢 Клуб: {club_name}\n")
-            
-            # Добавляем итоги (НАЛ, Б/Н, Итого)
-            if total_records:
-                for rec in total_records:
-                    profit = decimal_to_float(rec['net_profit'])
-                    payment_type = rec['payment_type']
-                    
-                    # Меняем названия
-                    if 'нал' in payment_type.lower() and 'безнал' not in payment_type.lower() and 'б/н' not in payment_type.lower():
-                        summary_lines.append(f"💵 НАЛ: {profit:.0f}")
-                    elif 'б/н' in payment_type.lower() or 'безнал' in payment_type.lower():
-                        summary_lines.append(f"💳 Б/Н: {profit:.0f}")
-                    elif 'итого' in payment_type.lower():
-                        summary_lines.append(f"📊 Итого прибыль: {profit:.0f}")
-                    else:
-                        summary_lines.append(f"📊 {payment_type}: {profit:.0f}")
+            summary_lines.append(f"🏢 Клуб: {club_name}")
             
             await update.message.reply_text(
                 "\n".join(summary_lines),
@@ -8954,6 +8969,139 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 lines.append(f"• [{category}] {entry_text}: {decimal_to_float(amount):.0f}")
             else:
                 lines.append(f"• [{category}] {entry_text}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    # ============================================
+    # ОБРАБОТЧИКИ ИТОГОВ (НАЛ, Б/Н, Итого)
+    # ============================================
+    
+    elif query.data == 'final_total_nal':
+        # Кнопка "НАЛ"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        total_records = db.list_totals_summary(file_id)
+        if not total_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        nal_rec = None
+        for rec in total_records:
+            payment_type = rec['payment_type'].lower()
+            if 'нал' in payment_type and 'безнал' not in payment_type and 'б/н' not in payment_type:
+                nal_rec = rec
+                break
+        
+        if not nal_rec:
+            await query.answer("⚠️ Нет данных по НАЛ", show_alert=True)
+            return
+        
+        income = decimal_to_float(nal_rec['income_amount'])
+        expense = decimal_to_float(nal_rec['expense_amount'])
+        profit = decimal_to_float(nal_rec['net_profit'])
+        
+        lines = [
+            f"💵 НАЛИЧНЫЕ",
+            f"📅 Дата: {date_str}",
+            f"🏢 Клуб: {club_name}\n",
+            f"💰 Доходы: {income:.0f}",
+            f"💸 Расходы: {expense:.0f}",
+            f"─────────────",
+            f"📊 Прибыль: {profit:.0f}"
+        ]
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_total_bn':
+        # Кнопка "Б/Н"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        total_records = db.list_totals_summary(file_id)
+        if not total_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        bn_rec = None
+        for rec in total_records:
+            payment_type = rec['payment_type'].lower()
+            if 'б/н' in payment_type or 'безнал' in payment_type:
+                bn_rec = rec
+                break
+        
+        if not bn_rec:
+            await query.answer("⚠️ Нет данных по Б/Н", show_alert=True)
+            return
+        
+        income = decimal_to_float(bn_rec['income_amount'])
+        expense = decimal_to_float(bn_rec['expense_amount'])
+        profit = decimal_to_float(bn_rec['net_profit'])
+        
+        lines = [
+            f"💳 БЕЗНАЛИЧНЫЕ",
+            f"📅 Дата: {date_str}",
+            f"🏢 Клуб: {club_name}\n",
+            f"💰 Доходы: {income:.0f}",
+            f"💸 Расходы: {expense:.0f}",
+            f"─────────────",
+            f"📊 Прибыль: {profit:.0f}"
+        ]
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data == 'final_total_itogo':
+        # Кнопка "Итого прибыль"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        total_records = db.list_totals_summary(file_id)
+        if not total_records:
+            await query.answer("⚠️ Нет данных", show_alert=True)
+            return
+        
+        itogo_rec = None
+        for rec in total_records:
+            payment_type = rec['payment_type'].lower()
+            if 'итого' in payment_type:
+                itogo_rec = rec
+                break
+        
+        if not itogo_rec:
+            await query.answer("⚠️ Нет данных по Итого", show_alert=True)
+            return
+        
+        income = decimal_to_float(itogo_rec['income_amount'])
+        expense = decimal_to_float(itogo_rec['expense_amount'])
+        profit = decimal_to_float(itogo_rec['net_profit'])
+        
+        lines = [
+            f"📊 ИТОГО",
+            f"📅 Дата: {date_str}",
+            f"🏢 Клуб: {club_name}\n",
+            f"💰 Доходы: {income:.0f}",
+            f"💸 Расходы: {expense:.0f}",
+            f"─────────────",
+            f"📊 Прибыль: {profit:.0f}"
+        ]
         
         await query.message.reply_text("\n".join(lines))
         await query.answer()
