@@ -1641,10 +1641,25 @@ class ExcelProcessor:
         try:
             # 1. Получаем прочие расходы и ищем депозиты
             logger.info("Step 1: Extracting misc expenses for deposits...")
-            misc_expenses_text = self.extract_misc_expenses_from_notes_after_total(file_content)
-            if misc_expenses_text:
-                # Парсим прочие расходы
+            misc_expenses_data = self.extract_misc_expenses_from_notes_after_total(file_content)
+            if misc_expenses_data and misc_expenses_data.get('records'):
+                # Парсим прочие расходы из записей
                 deposits = []
+                for record in misc_expenses_data['records']:
+                    expense_item = record.get('expense_item', '')
+                    amount = record.get('amount', Decimal('0'))
+                    
+                    # Проверяем, содержит ли статья слово "депозит"
+                    if 'депозит' in expense_item.lower():
+                        deposits.append({
+                            'amount': amount,
+                            'item': expense_item
+                        })
+                        result['deposits_total'] += amount
+                
+                # Старый код для обратной совместимости (если нужно парсить из текста)
+                # Удаляем, так как теперь используем records
+                """
                 for line in misc_expenses_text.split('\n'):
                     line = line.strip()
                     if not line or line.lower().startswith('итого'):
