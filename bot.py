@@ -5827,10 +5827,6 @@ async def generate_salary_excel_by_employee(update: Update, code: str, date_from
         
         row_num += 1
     
-    # Закрываем соединение (только если было создано)
-    if conn:
-        conn.close()
-    
     # Строка ИТОГО
     vychet_10_total = round(totals['debt'] * 0.1)  # Округление до целого
     
