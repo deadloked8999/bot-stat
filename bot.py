@@ -7080,12 +7080,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                         summary_lines.append(f"📊 Итого: {len(totals['records'])} записей")
                     
                     # Отправляем итоговое сообщение
-                    if summary_lines:
-                        final_summary = "📊 ИТОГОВЫЙ ЛИСТ ОБРАБОТАН\n\n" + "\n".join(summary_lines)
+                    try:
+                        if summary_lines:
+                            final_summary = "📊 ИТОГОВЫЙ ЛИСТ ОБРАБОТАН\n\n" + "\n".join(summary_lines)
+                        else:
+                            final_summary = "📊 ИТОГОВЫЙ ЛИСТ ОБРАБОТАН\n\n⚠️ Блоки данных не найдены в файле"
+                        
                         await context.bot.send_message(chat_id=user_id, text=final_summary)
-                        print(f"[INFO] Итоговый лист обработан: file_id={file_id}")
-                    else:
-                        print("[WARNING] Итоговый лист пуст, блоки не найдены")
+                        print(f"[INFO] Итоговый лист обработан: file_id={file_id}, summary_lines={len(summary_lines)}")
+                    except Exception as send_error:
+                        print(f"[ERROR] Ошибка отправки сообщения об итогах: {send_error}")
+                        import traceback
+                        traceback.print_exc()
                 
         except Exception as e:
             print(f"[ERROR] Ошибка парсинга итогового листа: {e}")
