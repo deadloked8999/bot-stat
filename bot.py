@@ -6786,11 +6786,159 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"Данные можно просмотреть через кнопку ЗП"
         )
         
+        # ============================================
+        # ПАРСИНГ И СОХРАНЕНИЕ ИТОГОВОГО ЛИСТА
+        # ============================================
+        try:
+            from excel_processor import ExcelProcessor
+            
+            if not hasattr(state, 'uploaded_file_bytes') or not state.uploaded_file_bytes:
+                print("[WARNING] Файл не сохранён в state, пропускаем парсинг итогового листа")
+            else:
+                processor = ExcelProcessor()
+                file_bytes = state.uploaded_file_bytes
+                
+                # Сохраняем информацию о файле
+                import hashlib
+                file_hash = hashlib.md5(file_bytes).hexdigest()
+                
+                file_id = db.save_report_file(
+                    user_id=user_id,
+                    username=query.from_user.username or "",
+                    file_name=f"report_{state.payments_upload_club}_{state.payments_upload_date}.xlsx",
+                    file_hash=file_hash,
+                    club_name=state.payments_upload_club,
+                    report_date=state.payments_upload_date,
+                    file_content=file_bytes
+                )
+                
+                if not file_id:
+                    print("[ERROR] Не удалось сохранить файл отчёта")
+                else:
+                    summary_lines = []
+                    
+                    # 1. Доходы
+                    income_records = processor.extract_income_records(file_bytes)
+                    if income_records:
+                        db.save_income_records(file_id, income_records)
+                        income_total = next(
+                            (r['amount'] for r in income_records if 'итого' in str(r.get('category', '')).lower()),
+                            None
+                        )
+                        if income_total:
+                            summary_lines.append(f"💰 Доходы: {len(income_records)} записей (итого: {income_total:,.0f})")
+                        else:
+                            summary_lines.append(f"💰 Доходы: {len(income_records)} записей")
+                    
+                    # 2. Входные билеты
+                    ticket_sales_data = processor.extract_ticket_sales(file_bytes)
+                    if ticket_sales_data and ticket_sales_data.get('records'):
+                        db.save_ticket_sales(file_id, ticket_sales_data['records'])
+                        ticket_total = ticket_sales_data.get('total_amount')
+                        if ticket_total:
+                            summary_lines.append(f"🎟 Входные билеты: {len(ticket_sales_data['records'])} записей (итого: {ticket_total:,.0f})")
+                        else:
+                            summary_lines.append(f"🎟 Входные билеты: {len(ticket_sales_data['records'])} записей")
+                    
+                    # 3. Типы оплат
+                    payment_types_data = processor.extract_payment_types(file_bytes)
+                    if payment_types_data and payment_types_data.get('records'):
+                        db.save_payment_types(file_id, payment_types_data['records'])
+                        payment_total = payment_types_data.get('reported_total')
+                        if payment_total:
+                            summary_lines.append(f"💳 Типы оплат: {len(payment_types_data['records'])} записей (итого: {payment_total:,.0f})")
+                        else:
+                            summary_lines.append(f"💳 Типы оплат: {len(payment_types_data['records'])} записей")
+                    
+                    # 4. Статистика персонала
+                    staff_stats = processor.extract_staff_statistics(file_bytes)
+                    if staff_stats:
+                        db.save_staff_statistics(file_id, staff_stats)
+                        total_staff = sum(s.get('staff_count', 0) for s in staff_stats)
+                        summary_lines.append(f"👥 Персонал: {total_staff} человек")
+                    
+                    # 5. Расходы
+                    expense_data = processor.extract_expense_records(file_bytes)
+                    if expense_data and expense_data.get('records'):
+                        db.save_expense_records(file_id, expense_data['records'])
+                        expense_total = expense_data.get('reported_total')
+                        if expense_total:
+                            summary_lines.append(f"💸 Расходы: {len(expense_data['records'])} записей (итого: {expense_total:,.0f})")
+                        else:
+                            summary_lines.append(f"💸 Расходы: {len(expense_data['records'])} записей")
+                    
+                    # 6. Прочие расходы
+                    misc_expenses = processor.extract_misc_expenses_from_notes_after_total(file_bytes)
+                    if misc_expenses and misc_expenses.get('records'):
+                        db.save_misc_expenses(file_id, misc_expenses['records'])
+                        misc_total = misc_expenses.get('reported_total')
+                        if misc_total:
+                            summary_lines.append(f"📝 Прочие расходы: {len(misc_expenses['records'])} записей (итого: {misc_total:,.0f})")
+                        else:
+                            summary_lines.append(f"📝 Прочие расходы: {len(misc_expenses['records'])} записей")
+                    
+                    # 7. Такси
+                    taxi_data = processor.extract_taxi_expenses(file_bytes)
+                    if taxi_data and taxi_data.get('records'):
+                        db.save_taxi_expenses(file_id, taxi_data['records'])
+                        for record in taxi_data['records']:
+                            taxi_total = record.get('total_amount')
+                            if taxi_total:
+                                summary_lines.append(f"🚕 Такси: {taxi_total:,.0f}")
+                                break
+                    
+                    # 8. Инкассация
+                    cash_collection = processor.extract_cash_collection(file_bytes)
+                    if cash_collection and cash_collection.get('records'):
+                        db.save_cash_collection(file_id, cash_collection['records'])
+                        cash_total = cash_collection.get('reported_total')
+                        if cash_total:
+                            summary_lines.append(f"🏦 Инкассация: {len(cash_collection['records'])} записей (итого: {cash_total:,.0f})")
+                        else:
+                            summary_lines.append(f"🏦 Инкассация: {len(cash_collection['records'])} записей")
+                    
+                    # 9. Долги по персоналу
+                    staff_debts = processor.extract_staff_debts(file_bytes)
+                    if staff_debts and staff_debts.get('records'):
+                        db.save_staff_debts(file_id, staff_debts['records'])
+                        debt_total = staff_debts.get('reported_total')
+                        if debt_total:
+                            summary_lines.append(f"📌 Долги персонала: {len(staff_debts['records'])} записей (итого: {debt_total:,.0f})")
+                        else:
+                            summary_lines.append(f"📌 Долги персонала: {len(staff_debts['records'])} записей")
+                    
+                    # 10. Примечания
+                    notes = processor.extract_notes_entries(file_bytes)
+                    if notes:
+                        db.save_notes_entries(file_id, notes)
+                        summary_lines.append(f"📋 Примечания: {len(notes)} записей")
+                    
+                    # 11. Итого
+                    totals = processor.extract_totals_summary(file_bytes)
+                    if totals and totals.get('records'):
+                        db.save_totals_summary(file_id, totals['records'])
+                        summary_lines.append(f"📊 Итого: {len(totals['records'])} записей")
+                    
+                    # Отправляем итоговое сообщение
+                    if summary_lines:
+                        final_summary = "📊 ИТОГОВЫЙ ЛИСТ ОБРАБОТАН\n\n" + "\n".join(summary_lines)
+                        await context.bot.send_message(chat_id=user_id, text=final_summary)
+                        print(f"[INFO] Итоговый лист обработан: file_id={file_id}")
+                    else:
+                        print("[WARNING] Итоговый лист пуст, блоки не найдены")
+                
+        except Exception as e:
+            print(f"[ERROR] Ошибка парсинга итогового листа: {e}")
+            import traceback
+            traceback.print_exc()
+            # Ошибка не критична — выплаты уже сохранены
+        
         # Очищаем состояние
         state.payments_upload_club = None
         state.payments_upload_date = None
         state.payments_preview_data = None
         state.payments_name_changes = None
+        state.uploaded_file_bytes = None  # Очищаем сохранённый файл
     
     elif query.data == 'payments_save_cancel':
         await query.edit_message_text("❌ Загрузка отменена")
