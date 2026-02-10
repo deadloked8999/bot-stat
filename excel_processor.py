@@ -328,66 +328,106 @@ class ExcelProcessor:
             raise ValueError(f"Не удалось экспортировать данные: {str(e)}")
     
     def export_full_period_report_to_excel(self, all_blocks: Dict[str, List[Dict[str, Any]]], club_name: str, start_date, end_date) -> bytes:
-        """Экспорт ПОЛНОГО комплексного отчета за период в Excel со всеми блоками (ГОРИЗОНТАЛЬНЫЙ формат)"""
+        """Экспорт ПОЛНОГО комплексного отчета за период в Excel (адаптивный формат: 2 блока в ряд)"""
         try:
             from datetime import date
             from openpyxl import Workbook
-            from openpyxl.styles import Font, Alignment
+            from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
             
             wb = Workbook()
             ws = wb.active
             ws.title = "Полный отчет"
             
+            # Стили
+            bold_font = Font(bold=True, size=11)
+            block_title_font = Font(bold=True, size=12, color='FFFFFF')
+            header_font = Font(bold=True, size=10)
+            title_font = Font(bold=True, size=14)
+            
+            # Границы
+            thick_border = Border(
+                left=Side(style='thick'),
+                right=Side(style='thick'),
+                top=Side(style='thick'),
+                bottom=Side(style='thick')
+            )
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
+            # Цветной фон для заголовков блоков (светло-синий)
+            block_header_fill = PatternFill(fill_type='solid', fgColor='ADD8E6')
+            
             # Заголовок отчета
             ws['A1'] = f'Клуб: {club_name}'
-            ws['A1'].font = Font(bold=True, size=14)
-            
+            ws['A1'].font = title_font
             start_str = start_date.strftime("%d.%m.%Y") if isinstance(start_date, date) else str(start_date)
             end_str = end_date.strftime("%d.%m.%Y") if isinstance(end_date, date) else str(end_date)
-            ws['B1'] = f'Период: {start_str} - {end_str}'
-            ws['B1'].font = Font(bold=True, size=14)
+            ws['B1'] = f'Дата: {start_str}'
+            ws['B1'].font = title_font
             
-            bold_font = Font(bold=True, size=11)
-            block_title_font = Font(bold=True, size=13)
+            # Определяем порядок блоков
+            block_order = [
+                'Доходы', 'Входные билеты', 'Типы оплат', 'Персонал',
+                'Расходы', 'Инкассация', 'Долги персонала', 'Прочие расходы',
+                'Такси', 'Примечания', 'Итого'
+            ]
             
-            # ГОРИЗОНТАЛЬНЫЙ формат: блоки идут в колонках
-            current_col = 1  # Начинаем с колонки A
+            # Фильтруем и сортируем блоки
+            ordered_blocks = []
+            for block_name in block_order:
+                if block_name in all_blocks and all_blocks[block_name]:
+                    ordered_blocks.append((block_name, all_blocks[block_name]))
             
-            for block_name, block_data in all_blocks.items():
-                if not block_data:
-                    continue
+            # Начальная позиция
+            current_row = 3  # Начинаем с 3-й строки (после заголовка)
+            left_block_start_col = 1
+            right_block_start_col = 15  # Правая колонка для второго блока
+            
+            # Обрабатываем блоки по 2 в ряд
+            i = 0
+            while i < len(ordered_blocks):
+                block_name, block_data = ordered_blocks[i]
                 
-                # Заголовок блока в строке 3
-                ws.cell(row=3, column=current_col, value=f"📊 {block_name.upper()}")
-                ws.cell(row=3, column=current_col).font = block_title_font
-                ws.cell(row=3, column=current_col).alignment = Alignment(horizontal='center')
+                # Определяем, это последний блок (ИТОГО)?
+                is_last = (block_name == 'Итого' or i == len(ordered_blocks) - 1)
                 
-                # Заголовки и данные
-                if block_data:
-                    headers = list(block_data[0].keys())
+                if is_last and block_name == 'Итого':
+                    # ИТОГО на всю ширину
+                    self._add_block_to_sheet(
+                        ws, block_name, block_data, current_row, 1, 30,
+                        thick_border, thin_border, block_header_fill, block_title_font, header_font, bold_font
+                    )
+                    current_row += len(block_data) + 3  # +3: заголовок, заголовки колонок, пустая строка
+                    break
+                else:
+                    # Обычный блок (левый)
+                    left_height = len(block_data) + 2  # +2: заголовок блока + заголовки колонок
+                    self._add_block_to_sheet(
+                        ws, block_name, block_data, current_row, left_block_start_col, None,
+                        thick_border, thin_border, block_header_fill, block_title_font, header_font, bold_font
+                    )
                     
-                    # Каждый заголовок в своей колонке
-                    for header_idx, header in enumerate(headers):
-                        header_col = current_col + header_idx
-                        
-                        # Заголовок колонки в строке 4
-                        cell = ws.cell(row=4, column=header_col, value=header)
-                        cell.font = bold_font
-                        cell.alignment = Alignment(horizontal='center')
-                        
-                        # Данные блока (начиная со строки 5)
-                        for data_idx, row_data in enumerate(block_data):
-                            data_row = 5 + data_idx
-                            value = row_data.get(header)
-                            cell = ws.cell(row=data_row, column=header_col, value=value)
-                            
-                            # Делаем строки с "ИТОГО" жирными
-                            first_col_value = row_data.get(headers[0])
-                            if first_col_value and isinstance(first_col_value, str) and 'итого' in first_col_value.lower():
-                                cell.font = bold_font
+                    # Правый блок (если есть)
+                    right_height = 0
+                    if i + 1 < len(ordered_blocks):
+                        next_block_name, next_block_data = ordered_blocks[i + 1]
+                        if next_block_name != 'Итого':
+                            right_height = len(next_block_data) + 2
+                            self._add_block_to_sheet(
+                                ws, next_block_name, next_block_data, current_row, right_block_start_col, None,
+                                thick_border, thin_border, block_header_fill, block_title_font, header_font, bold_font
+                            )
+                            i += 1  # Пропускаем следующий блок, т.к. уже обработали
                     
-                    # Переходим к следующему блоку (сдвигаем на количество колонок + 1 пустая)
-                    current_col += len(headers) + 1
+                    # Вычисляем высоту блока (максимальная из двух)
+                    max_height = max(left_height, right_height) if right_height > 0 else left_height
+                    
+                    current_row += max_height + 2  # +2: пустая строка между блоками
+                    i += 1
             
             # Автоподбор ширины колонок
             for col in ws.columns:
@@ -402,6 +442,16 @@ class ExcelProcessor:
                 adjusted_width = min(max_length + 2, 50)
                 ws.column_dimensions[column].width = adjusted_width
             
+            # Автоподбор высоты строк
+            for row in ws.iter_rows():
+                max_height = 0
+                for cell in row:
+                    if cell.value:
+                        lines = str(cell.value).count('\n') + 1
+                        max_height = max(max_height, lines * 15)
+                if max_height > 0:
+                    ws.row_dimensions[row[0].row].height = max_height
+            
             # Сохраняем в память
             output = io.BytesIO()
             wb.save(output)
@@ -411,6 +461,77 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"Error exporting full period report to Excel: {e}")
             raise ValueError(f"Не удалось экспортировать комплексный отчет: {str(e)}")
+    
+    def _add_block_to_sheet(self, ws, block_name: str, block_data: List[Dict[str, Any]], 
+                           start_row: int, start_col: int, max_cols: int,
+                           thick_border, thin_border, block_header_fill, 
+                           block_title_font, header_font, bold_font):
+        """Добавляет блок данных на лист с форматированием"""
+        from openpyxl.styles import Alignment
+        
+        if not block_data:
+            return 0
+        
+        headers = list(block_data[0].keys())
+        num_cols = len(headers) if max_cols is None else min(len(headers), max_cols)
+        
+        # Заголовок блока (БЕЗ смайликов)
+        title_cell = ws.cell(row=start_row, column=start_col, value=block_name.upper())
+        title_cell.font = block_title_font
+        title_cell.fill = block_header_fill
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        title_cell.border = thick_border
+        
+        # Объединяем ячейки для заголовка блока
+        if max_cols:
+            ws.merge_cells(start_row=start_row, start_column=start_col, 
+                          end_row=start_row, end_column=start_col + num_cols - 1)
+        else:
+            ws.merge_cells(start_row=start_row, start_column=start_col, 
+                          end_row=start_row, end_column=start_col + num_cols - 1)
+        
+        # Заголовки колонок
+        header_row = start_row + 1
+        for col_idx, header in enumerate(headers[:num_cols]):
+            col = start_col + col_idx
+            cell = ws.cell(row=header_row, column=col, value=header)
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = thin_border
+        
+        # Данные
+        for data_idx, row_data in enumerate(block_data):
+            data_row = header_row + 1 + data_idx
+            for col_idx, header in enumerate(headers[:num_cols]):
+                col = start_col + col_idx
+                value = row_data.get(header)
+                cell = ws.cell(row=data_row, column=col, value=value)
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+                
+                # Жирный шрифт для строк "ИТОГО"
+                first_col_value = row_data.get(headers[0])
+                if first_col_value and isinstance(first_col_value, str) and 'итого' in first_col_value.lower():
+                    cell.font = bold_font
+        
+        # Толстые границы вокруг всего блока
+        end_row = header_row + len(block_data)
+        end_col = start_col + num_cols - 1
+        
+        # Применяем границы ко всем ячейкам блока
+        for row in range(start_row, end_row + 1):
+            for col in range(start_col, end_col + 1):
+                cell = ws.cell(row=row, column=col)
+                
+                # Определяем границы
+                top = Side(style='thick') if row == start_row else Side(style='thin')
+                bottom = Side(style='thick') if row == end_row else Side(style='thin')
+                left = Side(style='thick') if col == start_col else Side(style='thin')
+                right = Side(style='thick') if col == end_col else Side(style='thin')
+                
+                cell.border = Border(top=top, bottom=bottom, left=left, right=right)
+        
+        return num_cols
     
     def export_period_report_to_excel(self, data: List[Dict[str, Any]], club_name: str, start_date, end_date, block_name: str) -> bytes:
         """Экспорт сводного отчета за период в Excel"""
