@@ -985,6 +985,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state.mode = 'awaiting_salary_input'
             return
         
+        # Команда "ИТОГОВЫЕ ОТЧЁТЫ"
+        if text_lower in ['итоговые отчёты', '📈 итоговые отчёты', 'итоговые отчеты', '📈 итоговые отчеты']:
+            # Показываем выбор клуба
+            keyboard = [
+                [InlineKeyboardButton("🏢 Москвич", callback_data="final_club_select_Москвич")],
+                [InlineKeyboardButton("🏢 Анора", callback_data="final_club_select_Анора")]
+            ]
+            await update.message.reply_text(
+                "📈 ИТОГОВЫЕ ОТЧЁТЫ\n\n"
+                "Выберите клуб:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+        
         # Команда "ВЫХОД"
         if text_lower in ['выход', '🚪 выход']:
             state.owner_mode = False
@@ -997,7 +1011,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Если владелец в режиме ввода данных - не обрабатываем как команду
-        if state.mode in ['awaiting_salary_input', 'awaiting_report_period', 'awaiting_report_club']:
+        if state.mode in ['awaiting_salary_input', 'awaiting_report_period', 'awaiting_report_club', 'awaiting_final_report_date_or_period']:
             # Пропускаем - пусть обработают специализированные обработчики режимов ниже
             pass
         else:
@@ -1007,6 +1021,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Доступные команды:\n"
                 "• 📊 ОТЧЁТ\n"
                 "• 💵 ЗП\n"
+                "• 📈 ИТОГОВЫЕ ОТЧЁТЫ\n"
                 "• 🚪 ВЫХОД"
             )
             return
