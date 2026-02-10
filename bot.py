@@ -2243,15 +2243,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Доступно только для администраторов")
             return
         
-        # Пока заглушка
+        # Показываем меню выбора типа отчёта
+        keyboard = [
+            [InlineKeyboardButton("📅 Отчёт за дату", callback_data="final_report_by_date")]
+        ]
         await update.message.reply_text(
             "📈 ИТОГОВЫЕ ОТЧЁТЫ\n\n"
-            "Функция в разработке...\n\n"
-            "Здесь будет возможность просмотра:\n"
-            "• Доходы за период\n"
-            "• Расходы за период\n"
-            "• Полный отчёт\n"
-            "• Экспорт в Excel"
+            "Выберите тип отчёта:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
