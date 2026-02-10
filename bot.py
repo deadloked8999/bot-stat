@@ -7075,9 +7075,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     
                     # 11. Итого
                     totals = processor.extract_totals_summary(file_bytes)
-                    if totals and totals.get('records'):
-                        db.save_totals_summary(file_id, totals['records'])
-                        summary_lines.append(f"📊 Итого: {len(totals['records'])} записей")
+                    if totals and isinstance(totals, list) and len(totals) > 0:
+                        db.save_totals_summary(file_id, totals)
+                        summary_lines.append(f"📊 Итого: {len(totals)} записей")
                     
                     # Отправляем итоговое сообщение
                     try:

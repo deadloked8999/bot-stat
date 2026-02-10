@@ -2503,10 +2503,19 @@ class Database:
         
         try:
             for record in records:
+                amount = record.get('amount')
+                # Конвертируем Decimal в float для SQLite
+                if amount is not None:
+                    from decimal import Decimal
+                    if isinstance(amount, Decimal):
+                        amount = float(amount)
+                    elif not isinstance(amount, (int, float)):
+                        amount = float(amount)
+                
                 cursor.execute("""
                     INSERT INTO income_records (file_id, category, amount)
                     VALUES (?, ?, ?)
-                """, (file_id, record.get('category'), record.get('amount')))
+                """, (file_id, record.get('category'), amount))
             
             conn.commit()
             conn.close()
@@ -2549,12 +2558,18 @@ class Database:
         cursor = conn.cursor()
         
         try:
+            from decimal import Decimal
             for record in records:
+                # Конвертируем Decimal в float для SQLite
+                amount = record.get('amount')
+                if amount is not None and isinstance(amount, Decimal):
+                    amount = float(amount)
+                
                 cursor.execute("""
                     INSERT INTO payment_types_report 
                     (file_id, payment_type, amount, is_total, is_cash_total)
                     VALUES (?, ?, ?, ?, ?)
-                """, (file_id, record.get('payment_type'), record.get('amount'),
+                """, (file_id, record.get('payment_type'), amount,
                       1 if record.get('is_total') else 0,
                       1 if record.get('is_cash_total') else 0))
             
