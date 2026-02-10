@@ -8246,6 +8246,25 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"👔 УПРАВЛЕНИЕ ВЛАДЕЛЬЦАМИ\n\n" + "\n".join(owners_text_lines),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+    
+    # ============================================
+    # ОБРАБОТЧИКИ ДЛЯ ИТОГОВЫХ ОТЧЁТОВ
+    # ============================================
+    
+    elif query.data == 'final_report_by_date':
+        # Отчёт за дату - запрашиваем дату
+        if not db.is_admin(user_id):
+            await query.answer("🔒 Доступ запрещён", show_alert=True)
+            return
+        
+        await query.edit_message_text(
+            "📅 ОТЧЁТ ЗА ДАТУ\n\n"
+            "Введите дату в формате:\n"
+            "• ДД.ММ.ГГ (например: 15.01.26)\n"
+            "• ДД,ММ,ГГ (например: 15,01,26)\n\n"
+            "Будут показаны все загруженные отчёты за эту дату."
+        )
+        state.mode = 'awaiting_final_report_date'
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
