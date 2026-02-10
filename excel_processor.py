@@ -382,6 +382,13 @@ class ExcelProcessor:
                 if block_name in all_blocks and all_blocks[block_name]:
                     ordered_blocks.append((block_name, all_blocks[block_name]))
             
+            # Если нет блоков, возвращаем пустой отчет с заголовком
+            if not ordered_blocks:
+                output = io.BytesIO()
+                wb.save(output)
+                output.seek(0)
+                return output.getvalue()
+            
             # Начальная позиция
             current_row = 3  # Начинаем с 3-й строки (после заголовка)
             left_block_start_col = 1
@@ -459,7 +466,9 @@ class ExcelProcessor:
             return output.getvalue()
         
         except Exception as e:
-            logger.error(f"Error exporting full period report to Excel: {e}")
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"Error exporting full period report to Excel: {e}\n{error_details}")
             raise ValueError(f"Не удалось экспортировать комплексный отчет: {str(e)}")
     
     def _add_block_to_sheet(self, ws, block_name: str, block_data: List[Dict[str, Any]], 
@@ -472,8 +481,18 @@ class ExcelProcessor:
         if not block_data:
             return 0
         
+        if not block_data[0]:
+            return 0
+        
         headers = list(block_data[0].keys())
+        if not headers:
+            return 0
+        
         num_cols = len(headers) if max_cols is None else min(len(headers), max_cols)
+        
+        # Объединяем ячейки для заголовка блока (сначала объединяем, потом форматируем)
+        ws.merge_cells(start_row=start_row, start_column=start_col, 
+                      end_row=start_row, end_column=start_col + num_cols - 1)
         
         # Заголовок блока (БЕЗ смайликов)
         title_cell = ws.cell(row=start_row, column=start_col, value=block_name.upper())
@@ -481,14 +500,6 @@ class ExcelProcessor:
         title_cell.fill = block_header_fill
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
         title_cell.border = thick_border
-        
-        # Объединяем ячейки для заголовка блока
-        if max_cols:
-            ws.merge_cells(start_row=start_row, start_column=start_col, 
-                          end_row=start_row, end_column=start_col + num_cols - 1)
-        else:
-            ws.merge_cells(start_row=start_row, start_column=start_col, 
-                          end_row=start_row, end_column=start_col + num_cols - 1)
         
         # Заголовки колонок
         header_row = start_row + 1
@@ -501,17 +512,21 @@ class ExcelProcessor:
         
         # Данные
         for data_idx, row_data in enumerate(block_data):
+            if not row_data:
+                continue
             data_row = header_row + 1 + data_idx
             for col_idx, header in enumerate(headers[:num_cols]):
                 col = start_col + col_idx
-                value = row_data.get(header)
+                value = row_data.get(header, '')
+                if value is None:
+                    value = ''
                 cell = ws.cell(row=data_row, column=col, value=value)
                 cell.border = thin_border
                 cell.alignment = Alignment(horizontal='left', vertical='center')
                 
                 # Жирный шрифт для строк "ИТОГО"
-                first_col_value = row_data.get(headers[0])
-                if first_col_value and isinstance(first_col_value, str) and 'итого' in first_col_value.lower():
+                first_col_value = row_data.get(headers[0], '')
+                if first_col_value and isinstance(first_col_value, str) and 'итого' in str(first_col_value).lower():
                     cell.font = bold_font
         
         # Толстые границы вокруг всего блока
