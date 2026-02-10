@@ -134,6 +134,7 @@ class UserState:
         self.payments_name_changes: Optional[list] = None
         self.name_changes_data: Optional[list] = None
         self.name_changes_index: int = 0
+        self.uploaded_file_bytes: Optional[bytes] = None  # Сохранённый файл для парсинга итогового листа
         
         # Для расходов на стилистов
         self.stylist_club: Optional[str] = None
@@ -9226,6 +9227,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Скачиваем файл
             file = await context.bot.get_file(document.file_id)
             file_bytes = await file.download_as_bytearray()
+            
+            # Сохраняем файл в state для парсинга итогового листа
+            state.uploaded_file_bytes = bytes(file_bytes)
             
             # Парсим ЛИСТ ВЫПЛАТ
             excel_processor = ExcelProcessor()
