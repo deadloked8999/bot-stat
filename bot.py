@@ -7210,10 +7210,17 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                             summary_lines.append(f"📌 Долги персонала: {len(staff_debts['records'])} записей")
                     
                     # 10. Примечания
-                    notes = processor.extract_notes_entries(file_bytes)
-                    if notes:
-                        db.save_notes_entries(file_id, notes)
-                        summary_lines.append(f"📋 Примечания: {len(notes)} записей")
+                    notes_data = processor.extract_notes_entries(file_bytes)
+                    if notes_data and isinstance(notes_data, dict):
+                        # Объединяем все записи из всех категорий
+                        all_notes = []
+                        for category, entries in notes_data.items():
+                            if isinstance(entries, list):
+                                all_notes.extend(entries)
+                        
+                        if all_notes:
+                            db.save_notes_entries(file_id, all_notes)
+                            summary_lines.append(f"📋 Примечания: {len(all_notes)} записей")
                     
                     # 11. Итого
                     totals = processor.extract_totals_summary(file_bytes)
