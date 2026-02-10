@@ -2324,18 +2324,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         else:
             # Одна дата - парсим через parse_short_date
-            # parse_short_date возвращает tuple (date_from, date_to) или None
-            parsed = parse_short_date(input_text)
-            if not parsed:
+            # parse_short_date возвращает tuple (success, date_string, error)
+            success, date_str, error = parse_short_date(input_text)
+            if not success:
                 await update.message.reply_text(
-                    "❌ Неверный формат даты\n\n"
-                    "Используйте:\n"
-                    "• 7,2 или 7.2 (текущий год)"
+                    f"❌ Неверный формат даты\n\n"
+                    f"{error}\n\n"
+                    f"Используйте:\n"
+                    f"• 7,2 или 7.2 (текущий год)"
                 )
                 return
-            
-            # Берём первую дату из tuple
-            date_str = parsed[0] if isinstance(parsed, tuple) else parsed
             
             # Ищем файл за эту дату и клуб
             files = db.get_files_by_date(date_str)
