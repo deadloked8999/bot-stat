@@ -8358,6 +8358,460 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "Будут показаны все загруженные отчёты за эту дату."
         )
         state.mode = 'awaiting_final_report_date'
+    
+    elif query.data.startswith('final_club_'):
+        # Выбор клуба для итогового отчёта
+        if not db.is_admin(user_id):
+            await query.answer("🔒 Доступ запрещён", show_alert=True)
+            return
+        
+        club_name = query.data.replace('final_club_', '')
+        
+        # Найти file_id для этого клуба
+        file = None
+        for f in state.final_report_files:
+            if f['club_name'] == club_name:
+                file = f
+                break
+        
+        if not file:
+            await query.answer("❌ Файл не найден", show_alert=True)
+            return
+        
+        state.final_report_file_id = file['id']
+        state.final_report_club = club_name
+        
+        # Показываем выбор блока
+        keyboard = [
+            [InlineKeyboardButton("💰 Доходы", callback_data="final_block_income")],
+            [InlineKeyboardButton("🎟 Входные билеты", callback_data="final_block_tickets")],
+            [InlineKeyboardButton("💳 Типы оплат", callback_data="final_block_payments")],
+            [InlineKeyboardButton("👥 Персонал", callback_data="final_block_staff")],
+            [InlineKeyboardButton("💸 Расходы", callback_data="final_block_expenses")],
+            [InlineKeyboardButton("📝 Прочие расходы", callback_data="final_block_misc")],
+            [InlineKeyboardButton("🚕 Такси", callback_data="final_block_taxi")],
+            [InlineKeyboardButton("🏦 Инкассация", callback_data="final_block_cash")],
+            [InlineKeyboardButton("📌 Долги персонала", callback_data="final_block_debts")],
+            [InlineKeyboardButton("📋 Примечания", callback_data="final_block_notes")],
+            [InlineKeyboardButton("📊 Итого", callback_data="final_block_totals")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="final_cancel")]
+        ]
+        
+        await query.edit_message_text(
+            f"📅 Дата: {format_report_date(state.final_report_date)}\n"
+            f"🏢 Клуб: {club_name}\n\n"
+            f"Выберите блок для просмотра:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif query.data == 'final_cancel':
+        # Отмена просмотра итогового отчёта
+        await query.edit_message_text("❌ Отменено")
+        state.final_report_date = None
+        state.final_report_files = None
+        state.final_report_file_id = None
+        state.final_report_club = None
+    
+    # ============================================
+    # ОБРАБОТЧИКИ БЛОКОВ ИТОГОВОГО ОТЧЁТА
+    # ============================================
+    
+    elif query.data == 'final_block_income':
+        # Блок "Доходы"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_income_records(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        # Формируем данные для Excel
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Категория': rec['category'],
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        # Генерируем Excel
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Доходы", 
+            state.final_report_club
+        )
+        
+        # Отправляем файл
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"доходы_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"💰 Доходы\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_tickets':
+        # Блок "Входные билеты"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_ticket_sales(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Цена': rec.get('price_label', ''),
+                'Значение': decimal_to_float(rec.get('price_value', 0)),
+                'Количество': rec.get('quantity', 0),
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Входные билеты", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"билеты_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"🎟 Входные билеты\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_payments':
+        # Блок "Типы оплат"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_payment_types_report(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Тип оплаты': rec['payment_type'],
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Типы оплат", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"типы_оплат_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"💳 Типы оплат\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_staff':
+        # Блок "Персонал"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_staff_statistics(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Должность': rec['role_name'],
+                'Количество': rec['staff_count']
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Персонал", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"персонал_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"👥 Персонал\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_expenses':
+        # Блок "Расходы"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_expense_records(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Статья расходов': rec['expense_item'],
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Расходы", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"расходы_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"💸 Расходы\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_misc':
+        # Блок "Прочие расходы"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_misc_expenses_records(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Статья расходов': rec['expense_item'],
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Прочие расходы", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"прочие_расходы_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"📝 Прочие расходы\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_taxi':
+        # Блок "Такси"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_taxi_expenses(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Такси': decimal_to_float(rec.get('taxi_amount', 0)),
+                'Такси %': decimal_to_float(rec.get('taxi_percent_amount', 0)),
+                'Залоги': decimal_to_float(rec.get('deposits_total', 0)),
+                'Итого': decimal_to_float(rec['total_amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Такси", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"такси_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"🚕 Такси\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_cash':
+        # Блок "Инкассация"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_cash_collection(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Валюта': rec['currency_label'],
+                'Количество': rec.get('quantity', 0),
+                'Курс': decimal_to_float(rec.get('exchange_rate', 0)),
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Инкассация", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"инкассация_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"🏦 Инкассация\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_debts':
+        # Блок "Долги персонала"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_staff_debts(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Тип долга': rec['debt_type'],
+                'Сумма': decimal_to_float(rec['amount'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Долги персонала", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"долги_персонала_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"📌 Долги персонала\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_notes':
+        # Блок "Примечания"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_notes_entries(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Категория': rec['category'],
+                'Текст': rec['entry_text'],
+                'Сумма': decimal_to_float(rec.get('amount', 0)) if rec.get('amount') else ''
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Примечания", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"примечания_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"📋 Примечания\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_block_totals':
+        # Блок "Итого"
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        records = db.list_totals_summary(state.final_report_file_id)
+        
+        if not records:
+            await query.answer("❌ Нет данных", show_alert=True)
+            return
+        
+        display_rows = []
+        for rec in records:
+            display_rows.append({
+                'Тип оплаты': rec['payment_type'],
+                'Доходы': decimal_to_float(rec['income_amount']),
+                'Расходы': decimal_to_float(rec['expense_amount']),
+                'Прибыль': decimal_to_float(rec['net_profit'])
+            })
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_to_excel_with_header(
+            display_rows, 
+            state.final_report_date, 
+            "Итого", 
+            state.final_report_club
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"итого_{state.final_report_club}_{format_report_date(state.final_report_date)}.xlsx",
+            caption=f"📊 Итого\n📅 Дата: {format_report_date(state.final_report_date)}\n🏢 Клуб: {state.final_report_club}"
+        )
+        await query.answer("✅ Отчёт отправлен")
 
 
 def format_report_summary(totals: Dict, club_name: str, period: str, 
