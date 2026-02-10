@@ -221,6 +221,210 @@ class Database:
             ON employee_access(telegram_user_id)
         """)
         
+        # ============ ТАБЛИЦЫ ДЛЯ ИТОГОВОГО ЛИСТА ============
+        
+        # Таблица для хранения информации о загруженных файлах итогового листа
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS report_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                file_name TEXT NOT NULL,
+                upload_date TEXT DEFAULT (datetime('now')),
+                file_hash TEXT,
+                row_count INTEGER DEFAULT 0,
+                report_date TEXT,
+                file_content BLOB,
+                club_name TEXT
+            )
+        """)
+        
+        # Таблица для блока «ДОХОДЫ»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS income_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «ВХОДНЫЕ БИЛЕТЫ»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ticket_sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                price_label TEXT,
+                price_value REAL,
+                quantity INTEGER,
+                amount REAL,
+                is_total INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «ТИПЫ ОПЛАТ»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS payment_types_report (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                payment_type TEXT,
+                amount REAL,
+                is_total INTEGER DEFAULT 0,
+                is_cash_total INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Статистика персонала»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS staff_statistics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                role_name TEXT NOT NULL,
+                staff_count INTEGER NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Расходы»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS expense_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                expense_item TEXT NOT NULL,
+                amount REAL NOT NULL,
+                is_total INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Прочие расходы»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS misc_expenses_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                expense_item TEXT NOT NULL,
+                amount REAL NOT NULL,
+                is_total INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «ТАКСИ»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS taxi_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                taxi_amount REAL DEFAULT 0,
+                taxi_percent_amount REAL DEFAULT 0,
+                deposits_total REAL DEFAULT 0,
+                total_amount REAL NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Инкассация»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cash_collection (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                currency_label TEXT NOT NULL,
+                quantity REAL,
+                exchange_rate REAL,
+                amount REAL NOT NULL,
+                is_total INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Долги по персоналу»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS staff_debts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                debt_type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                is_total INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Примечание»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notes_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                category TEXT NOT NULL,
+                entry_text TEXT NOT NULL,
+                is_total INTEGER DEFAULT 0,
+                amount REAL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Таблица для блока «Итого»
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS totals_summary (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER REFERENCES report_files(id) ON DELETE CASCADE,
+                payment_type TEXT NOT NULL,
+                income_amount REAL NOT NULL,
+                expense_amount REAL NOT NULL,
+                net_profit REAL NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        # Индексы для таблиц итогового листа
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_income_records_file_id 
+            ON income_records(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ticket_sales_file_id 
+            ON ticket_sales(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_payment_types_report_file_id 
+            ON payment_types_report(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_staff_statistics_file_id 
+            ON staff_statistics(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_expense_records_file_id 
+            ON expense_records(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_misc_expenses_records_file_id 
+            ON misc_expenses_records(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_taxi_expenses_file_id 
+            ON taxi_expenses(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cash_collection_file_id 
+            ON cash_collection(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_staff_debts_file_id 
+            ON staff_debts(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notes_entries_file_id 
+            ON notes_entries(file_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_totals_summary_file_id 
+            ON totals_summary(file_id)
+        """)
+        
+        print("[INFO] Report tables created successfully")
+        
         conn.commit()
         conn.close()
     
