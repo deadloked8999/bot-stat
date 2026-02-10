@@ -476,7 +476,7 @@ class ExcelProcessor:
                            thick_border, thin_border, block_header_fill, 
                            block_title_font, header_font, bold_font):
         """Добавляет блок данных на лист с форматированием"""
-        from openpyxl.styles import Alignment
+        from openpyxl.styles import Alignment, Border, Side
         
         if not block_data:
             return 0
