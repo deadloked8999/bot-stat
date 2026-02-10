@@ -2788,6 +2788,32 @@ class Database:
     # ФУНКЦИИ ДЛЯ ПОЛУЧЕНИЯ ДАННЫХ ИТОГОВОГО ЛИСТА
     # ============================================
     
+    def get_files_by_date(self, report_date: str):
+        """Получить все файлы за конкретную дату (все клубы)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT id, user_id, username, file_name, upload_date, 
+                       file_hash, row_count, report_date, club_name
+                FROM report_files
+                WHERE report_date = ?
+                ORDER BY club_name, upload_date DESC
+            """, (report_date,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения файлов по дате: {e}")
+            conn.close()
+            return []
+    
     def get_files_by_period(self, start_date: str, end_date: str, club_name: str):
         """Получить все файлы за период для клуба"""
         conn = self.get_connection()
@@ -2992,6 +3018,31 @@ class Database:
             return results
         except Exception as e:
             print(f"Ошибка получения прочих расходов за период: {e}")
+            conn.close()
+            return []
+    
+    def list_taxi_expenses(self, file_id: int):
+        """Получение данных блока «ТАКСИ» по файлу"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT taxi_amount, taxi_percent_amount, deposits_total, total_amount, created_at
+                FROM taxi_expenses
+                WHERE file_id = ?
+                ORDER BY id
+            """, (file_id,))
+            
+            columns = [description[0] for description in cursor.description]
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Ошибка получения данных такси: {e}")
             conn.close()
             return []
     
