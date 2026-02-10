@@ -2249,13 +2249,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Доступно только для администраторов")
             return
         
-        # Показываем меню выбора типа отчёта
+        # Показываем выбор клуба
         keyboard = [
-            [InlineKeyboardButton("📅 Отчёт за дату", callback_data="final_report_by_date")]
+            [InlineKeyboardButton("🏢 Москвич", callback_data="final_club_select_Москвич")],
+            [InlineKeyboardButton("🏢 Анора", callback_data="final_club_select_Анора")]
         ]
         await update.message.reply_text(
             "📈 ИТОГОВЫЕ ОТЧЁТЫ\n\n"
-            "Выберите тип отчёта:",
+            "Выберите клуб:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -2306,86 +2307,135 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Обработка ввода даты для итогового отчёта
-    if state.mode == 'awaiting_final_report_date':
+    if state.mode == 'awaiting_final_report_date_or_period':
         if not db.is_admin(user_id):
             await update.message.reply_text("🔒 Доступ запрещён")
             state.mode = None
             return
         
-        # Парсим дату
-        parsed_date = parse_short_date(text.strip())
-        if not parsed_date:
-            await update.message.reply_text(
-                "❌ Неверный формат даты\n\n"
-                "Используйте:\n"
-                "• ДД.ММ.ГГ (например: 15.01.26)\n"
-                "• ДД,ММ,ГГ (например: 15,01,26)"
-            )
-            return
+        input_text = text.strip()
+        club_name = state.final_report_club
         
-        # Ищем файлы за эту дату
-        files = db.get_files_by_date(parsed_date)
-        
-        if not files:
-            await update.message.reply_text(
-                f"❌ НЕТ ДАННЫХ\n\n"
-                f"За дату {format_report_date(parsed_date)} не найдено загруженных отчётов.\n\n"
-                f"Загрузите файл через кнопку 'ЗАГРУЗИТЬ ЗП'."
-            )
+        # Проверяем: дата или период?
+        if '-' in input_text:
+            # Период (пока не реализовано)
+            await update.message.reply_text("⚠️ Отчёт за период пока не реализован")
             state.mode = None
             return
-        
-        # Сохраняем дату и файлы в state
-        state.final_report_date = parsed_date
-        state.final_report_files = files
-        
-        # Если файлов несколько (разные клубы), показываем выбор клуба
-        if len(files) > 1:
-            keyboard = []
-            clubs_seen = set()
-            
-            for file in files:
-                club_name = file['club_name']
-                if club_name not in clubs_seen:
-                    clubs_seen.add(club_name)
-                    keyboard.append([
-                        InlineKeyboardButton(
-                            f"🏢 {club_name}",
-                            callback_data=f"final_club_{club_name}"
-                        )
-                    ])
-            
-            await update.message.reply_text(
-                f"📅 Дата: {format_report_date(parsed_date)}\n\n"
-                f"Найдено отчётов: {len(files)}\n\n"
-                f"Выберите клуб:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
         else:
-            # Один файл - сразу показываем выбор блока
-            file = files[0]
-            state.final_report_file_id = file['id']
-            state.final_report_club = file['club_name']
+            # Одна дата - парсим через parse_short_date
+            # parse_short_date возвращает tuple (date_from, date_to) или None
+            parsed = parse_short_date(input_text)
+            if not parsed:
+                await update.message.reply_text(
+                    "❌ Неверный формат даты\n\n"
+                    "Используйте:\n"
+                    "• 7,2 или 7.2 (текущий год)"
+                )
+                return
             
-            keyboard = [
-                [InlineKeyboardButton("💰 Доходы", callback_data="final_block_income")],
-                [InlineKeyboardButton("🎟 Входные билеты", callback_data="final_block_tickets")],
-                [InlineKeyboardButton("💳 Типы оплат", callback_data="final_block_payments")],
-                [InlineKeyboardButton("👥 Персонал", callback_data="final_block_staff")],
-                [InlineKeyboardButton("💸 Расходы", callback_data="final_block_expenses")],
-                [InlineKeyboardButton("📝 Прочие расходы", callback_data="final_block_misc")],
-                [InlineKeyboardButton("🚕 Такси", callback_data="final_block_taxi")],
-                [InlineKeyboardButton("🏦 Инкассация", callback_data="final_block_cash")],
-                [InlineKeyboardButton("📌 Долги персонала", callback_data="final_block_debts")],
-                [InlineKeyboardButton("📋 Примечания", callback_data="final_block_notes")],
-                [InlineKeyboardButton("📊 Итого", callback_data="final_block_totals")],
-                [InlineKeyboardButton("❌ Отмена", callback_data="final_cancel")]
-            ]
+            # Берём первую дату из tuple
+            date_str = parsed[0] if isinstance(parsed, tuple) else parsed
+            
+            # Ищем файл за эту дату и клуб
+            files = db.get_files_by_date(date_str)
+            
+            # Фильтруем по клубу
+            club_files = [f for f in files if f['club_name'] == club_name]
+            
+            if not club_files:
+                await update.message.reply_text(
+                    f"❌ НЕТ ДАННЫХ\n\n"
+                    f"За дату {date_str} для клуба {club_name} не найдено загруженных отчётов.\n\n"
+                    f"Загрузите файл через кнопку 'ЗАГРУЗИТЬ ЗП'."
+                )
+                state.mode = None
+                return
+            
+            # Берём первый файл
+            file = club_files[0]
+            file_id = file['id']
+            
+            # Сохраняем в state
+            state.final_report_date = date_str
+            state.final_report_file_id = file_id
+            
+            # Получаем данные всех блоков и формируем текстовое сообщение
+            summary_lines = []
+            summary_lines.append(f"📅 Дата: {date_str}")
+            summary_lines.append(f"🏢 Клуб: {club_name}\n")
+            
+            # 1. Доходы
+            income_records = db.list_income_records(file_id)
+            if income_records:
+                total = sum(decimal_to_float(r['amount']) for r in income_records)
+                summary_lines.append(f"💰 Доходы: {total:,.0f}")
+            
+            # 2. Входные билеты
+            ticket_records = db.list_ticket_sales(file_id)
+            if ticket_records:
+                total = sum(decimal_to_float(r['amount']) for r in ticket_records)
+                summary_lines.append(f"🎟 Входные билеты: {total:,.0f}")
+            
+            # 3. Типы оплат
+            payment_records = db.list_payment_types_report(file_id)
+            if payment_records:
+                total = sum(decimal_to_float(r['amount']) for r in payment_records)
+                summary_lines.append(f"💳 Типы оплат: {total:,.0f}")
+            
+            # 4. Персонал
+            staff_records = db.list_staff_statistics(file_id)
+            if staff_records:
+                total = sum(r['staff_count'] for r in staff_records)
+                summary_lines.append(f"👥 Персонал: {total} человек")
+            
+            # 5. Расходы
+            expense_records = db.list_expense_records(file_id)
+            if expense_records:
+                total = sum(decimal_to_float(r['amount']) for r in expense_records)
+                summary_lines.append(f"💸 Расходы: {total:,.0f}")
+            
+            # 6. Прочие расходы
+            misc_records = db.list_misc_expenses_records(file_id)
+            if misc_records:
+                total = sum(decimal_to_float(r['amount']) for r in misc_records)
+                summary_lines.append(f"📝 Прочие расходы: {total:,.0f}")
+            
+            # 7. Такси
+            taxi_records = db.list_taxi_expenses(file_id)
+            if taxi_records:
+                total = sum(decimal_to_float(r['total_amount']) for r in taxi_records)
+                summary_lines.append(f"🚕 Такси: {total:,.0f}")
+            
+            # 8. Инкассация
+            cash_records = db.list_cash_collection(file_id)
+            if cash_records:
+                total = sum(decimal_to_float(r['amount']) for r in cash_records)
+                summary_lines.append(f"🏦 Инкассация: {total:,.0f}")
+            
+            # 9. Долги персонала
+            debt_records = db.list_staff_debts(file_id)
+            if debt_records:
+                total = sum(decimal_to_float(r['amount']) for r in debt_records)
+                summary_lines.append(f"📌 Долги персонала: {total:,.0f}")
+            
+            # 10. Примечания
+            note_records = db.list_notes_entries(file_id)
+            if note_records:
+                summary_lines.append(f"📋 Примечания: {len(note_records)} записей")
+            
+            # 11. Итого
+            total_records = db.list_totals_summary(file_id)
+            if total_records:
+                for rec in total_records:
+                    profit = decimal_to_float(rec['net_profit'])
+                    summary_lines.append(f"📊 Итого ({rec['payment_type']}): Прибыль {profit:,.0f}")
+            
+            # Кнопка "ПОДРОБНЕЕ"
+            keyboard = [[InlineKeyboardButton("📄 ПОДРОБНЕЕ", callback_data="final_details")]]
             
             await update.message.reply_text(
-                f"📅 Дата: {format_report_date(parsed_date)}\n"
-                f"🏢 Клуб: {file['club_name']}\n\n"
-                f"Выберите блок для просмотра:",
+                "\n".join(summary_lines),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         
@@ -8344,65 +8394,25 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # ОБРАБОТЧИКИ ДЛЯ ИТОГОВЫХ ОТЧЁТОВ
     # ============================================
     
-    elif query.data == 'final_report_by_date':
-        # Отчёт за дату - запрашиваем дату
-        if not db.is_admin(user_id):
-            await query.answer("🔒 Доступ запрещён", show_alert=True)
-            return
-        
-        await query.edit_message_text(
-            "📅 ОТЧЁТ ЗА ДАТУ\n\n"
-            "Введите дату в формате:\n"
-            "• ДД.ММ.ГГ (например: 15.01.26)\n"
-            "• ДД,ММ,ГГ (например: 15,01,26)\n\n"
-            "Будут показаны все загруженные отчёты за эту дату."
-        )
-        state.mode = 'awaiting_final_report_date'
-    
-    elif query.data.startswith('final_club_'):
+    elif query.data.startswith('final_club_select_'):
         # Выбор клуба для итогового отчёта
         if not db.is_admin(user_id):
             await query.answer("🔒 Доступ запрещён", show_alert=True)
             return
         
-        club_name = query.data.replace('final_club_', '')
-        
-        # Найти file_id для этого клуба
-        file = None
-        for f in state.final_report_files:
-            if f['club_name'] == club_name:
-                file = f
-                break
-        
-        if not file:
-            await query.answer("❌ Файл не найден", show_alert=True)
-            return
-        
-        state.final_report_file_id = file['id']
+        club_name = query.data.replace('final_club_select_', '')
         state.final_report_club = club_name
         
-        # Показываем выбор блока
-        keyboard = [
-            [InlineKeyboardButton("💰 Доходы", callback_data="final_block_income")],
-            [InlineKeyboardButton("🎟 Входные билеты", callback_data="final_block_tickets")],
-            [InlineKeyboardButton("💳 Типы оплат", callback_data="final_block_payments")],
-            [InlineKeyboardButton("👥 Персонал", callback_data="final_block_staff")],
-            [InlineKeyboardButton("💸 Расходы", callback_data="final_block_expenses")],
-            [InlineKeyboardButton("📝 Прочие расходы", callback_data="final_block_misc")],
-            [InlineKeyboardButton("🚕 Такси", callback_data="final_block_taxi")],
-            [InlineKeyboardButton("🏦 Инкассация", callback_data="final_block_cash")],
-            [InlineKeyboardButton("📌 Долги персонала", callback_data="final_block_debts")],
-            [InlineKeyboardButton("📋 Примечания", callback_data="final_block_notes")],
-            [InlineKeyboardButton("📊 Итого", callback_data="final_block_totals")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="final_cancel")]
-        ]
-        
         await query.edit_message_text(
-            f"📅 Дата: {format_report_date(state.final_report_date)}\n"
+            f"📈 ИТОГОВЫЕ ОТЧЁТЫ\n"
             f"🏢 Клуб: {club_name}\n\n"
-            f"Выберите блок для просмотра:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            f"Введите дату или период:\n\n"
+            f"📅 За дату:\n"
+            f"• 7,2 или 7.2 (текущий год)\n\n"
+            f"📊 За период:\n"
+            f"• 1,1-31,1 или 1.1-31.1"
         )
+        state.mode = 'awaiting_final_report_date_or_period'
     
     elif query.data == 'final_cancel':
         # Отмена просмотра итогового отчёта
@@ -8411,6 +8421,157 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         state.final_report_files = None
         state.final_report_file_id = None
         state.final_report_club = None
+    
+    elif query.data == 'final_details':
+        # Кнопка "ПОДРОБНЕЕ" - отправить полный Excel со всеми блоками
+        if not db.is_admin(user_id) or not state.final_report_file_id:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        file_id = state.final_report_file_id
+        club_name = state.final_report_club
+        date_str = state.final_report_date
+        
+        # Собираем данные всех блоков
+        all_blocks = {}
+        
+        # 1. Доходы
+        income_records = db.list_income_records(file_id)
+        if income_records:
+            all_blocks['Доходы'] = [
+                {'Категория': r['category'], 'Сумма': decimal_to_float(r['amount'])}
+                for r in income_records
+            ]
+        
+        # 2. Входные билеты
+        ticket_records = db.list_ticket_sales(file_id)
+        if ticket_records:
+            all_blocks['Входные билеты'] = [
+                {
+                    'Цена': r.get('price_label', ''),
+                    'Значение': decimal_to_float(r.get('price_value', 0)),
+                    'Количество': r.get('quantity', 0),
+                    'Сумма': decimal_to_float(r['amount'])
+                }
+                for r in ticket_records
+            ]
+        
+        # 3. Типы оплат
+        payment_records = db.list_payment_types_report(file_id)
+        if payment_records:
+            all_blocks['Типы оплат'] = [
+                {'Тип оплаты': r['payment_type'], 'Сумма': decimal_to_float(r['amount'])}
+                for r in payment_records
+            ]
+        
+        # 4. Персонал
+        staff_records = db.list_staff_statistics(file_id)
+        if staff_records:
+            all_blocks['Персонал'] = [
+                {'Должность': r['role_name'], 'Количество': r['staff_count']}
+                for r in staff_records
+            ]
+        
+        # 5. Расходы
+        expense_records = db.list_expense_records(file_id)
+        if expense_records:
+            all_blocks['Расходы'] = [
+                {'Статья расходов': r['expense_item'], 'Сумма': decimal_to_float(r['amount'])}
+                for r in expense_records
+            ]
+        
+        # 6. Прочие расходы
+        misc_records = db.list_misc_expenses_records(file_id)
+        if misc_records:
+            all_blocks['Прочие расходы'] = [
+                {'Статья расходов': r['expense_item'], 'Сумма': decimal_to_float(r['amount'])}
+                for r in misc_records
+            ]
+        
+        # 7. Такси
+        taxi_records = db.list_taxi_expenses(file_id)
+        if taxi_records:
+            all_blocks['Такси'] = [
+                {
+                    'Такси': decimal_to_float(r.get('taxi_amount', 0)),
+                    'Такси %': decimal_to_float(r.get('taxi_percent_amount', 0)),
+                    'Залоги': decimal_to_float(r.get('deposits_total', 0)),
+                    'Итого': decimal_to_float(r['total_amount'])
+                }
+                for r in taxi_records
+            ]
+        
+        # 8. Инкассация
+        cash_records = db.list_cash_collection(file_id)
+        if cash_records:
+            all_blocks['Инкассация'] = [
+                {
+                    'Валюта': r['currency_label'],
+                    'Количество': r.get('quantity', 0),
+                    'Курс': decimal_to_float(r.get('exchange_rate', 0)),
+                    'Сумма': decimal_to_float(r['amount'])
+                }
+                for r in cash_records
+            ]
+        
+        # 9. Долги персонала
+        debt_records = db.list_staff_debts(file_id)
+        if debt_records:
+            all_blocks['Долги персонала'] = [
+                {'Тип долга': r['debt_type'], 'Сумма': decimal_to_float(r['amount'])}
+                for r in debt_records
+            ]
+        
+        # 10. Примечания
+        note_records = db.list_notes_entries(file_id)
+        if note_records:
+            all_blocks['Примечания'] = [
+                {
+                    'Категория': r['category'],
+                    'Текст': r['entry_text'],
+                    'Сумма': decimal_to_float(r.get('amount', 0)) if r.get('amount') else ''
+                }
+                for r in note_records
+            ]
+        
+        # 11. Итого
+        total_records = db.list_totals_summary(file_id)
+        if total_records:
+            all_blocks['Итого'] = [
+                {
+                    'Тип оплаты': r['payment_type'],
+                    'Доходы': decimal_to_float(r['income_amount']),
+                    'Расходы': decimal_to_float(r['expense_amount']),
+                    'Прибыль': decimal_to_float(r['net_profit'])
+                }
+                for r in total_records
+            ]
+        
+        # Генерируем полный Excel
+        from excel_processor import ExcelProcessor
+        from datetime import datetime
+        excel_processor = ExcelProcessor()
+        
+        # Конвертируем date_str в datetime
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        except:
+            date_obj = date_str
+        
+        excel_bytes = excel_processor.export_full_period_report_to_excel(
+            all_blocks,
+            club_name,
+            date_obj,
+            date_obj
+        )
+        
+        # Отправляем файл
+        await query.message.reply_document(
+            excel_bytes,
+            filename=f"полный_отчет_{club_name}_{date_str}.xlsx",
+            caption=f"📋 ПОЛНЫЙ ОТЧЁТ\n📅 Дата: {date_str}\n🏢 Клуб: {club_name}\n📊 Блоков: {len(all_blocks)}"
+        )
+        await query.answer("✅ Отчёт отправлен")
     
     # ============================================
     # ОБРАБОТЧИКИ БЛОКОВ ИТОГОВОГО ОТЧЁТА
