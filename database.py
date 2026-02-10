@@ -2465,4 +2465,293 @@ class Database:
             print(f"Ошибка получения админов: {e}")
             conn.close()
             return []
+    
+    # ============================================
+    # ФУНКЦИИ ДЛЯ РАБОТЫ С ИТОГОВЫМ ЛИСТОМ
+    # ============================================
+    
+    def save_report_file(self, user_id: int, username: str, file_name: str, 
+                         file_hash: str, club_name: str, report_date: str, 
+                         file_content: bytes) -> int:
+        """Сохранить информацию о загруженном файле отчёта"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO report_files 
+                (user_id, username, file_name, file_hash, club_name, report_date, file_content)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, username, file_name, file_hash, club_name, report_date, file_content))
+            
+            file_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return file_id
+        except Exception as e:
+            print(f"Ошибка сохранения файла отчёта: {e}")
+            conn.close()
+            return None
+    
+    def save_income_records(self, file_id: int, records: list):
+        """Сохранить записи доходов"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO income_records (file_id, category, amount)
+                    VALUES (?, ?, ?)
+                """, (file_id, record.get('category'), record.get('amount')))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей доходов")
+        except Exception as e:
+            print(f"Ошибка сохранения доходов: {e}")
+            conn.close()
+    
+    def save_ticket_sales(self, file_id: int, records: list):
+        """Сохранить записи продаж билетов"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO ticket_sales 
+                    (file_id, price_label, price_value, quantity, amount, is_total)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (file_id, record.get('price_label'), record.get('price_value'),
+                      record.get('quantity'), record.get('amount'), 
+                      1 if record.get('is_total') else 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей билетов")
+        except Exception as e:
+            print(f"Ошибка сохранения билетов: {e}")
+            conn.close()
+    
+    def save_payment_types(self, file_id: int, records: list):
+        """Сохранить записи типов оплат"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO payment_types_report 
+                    (file_id, payment_type, amount, is_total, is_cash_total)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_id, record.get('payment_type'), record.get('amount'),
+                      1 if record.get('is_total') else 0,
+                      1 if record.get('is_cash_total') else 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей типов оплат")
+        except Exception as e:
+            print(f"Ошибка сохранения типов оплат: {e}")
+            conn.close()
+    
+    def save_staff_statistics(self, file_id: int, records: list):
+        """Сохранить статистику персонала"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO staff_statistics (file_id, role_name, staff_count)
+                    VALUES (?, ?, ?)
+                """, (file_id, record.get('role_name'), record.get('staff_count')))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей статистики персонала")
+        except Exception as e:
+            print(f"Ошибка сохранения статистики персонала: {e}")
+            conn.close()
+    
+    def save_expense_records(self, file_id: int, records: list):
+        """Сохранить записи расходов"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO expense_records (file_id, expense_item, amount, is_total)
+                    VALUES (?, ?, ?, ?)
+                """, (file_id, record.get('expense_item'), record.get('amount'),
+                      1 if record.get('is_total') else 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей расходов")
+        except Exception as e:
+            print(f"Ошибка сохранения расходов: {e}")
+            conn.close()
+    
+    def save_misc_expenses(self, file_id: int, records: list):
+        """Сохранить записи прочих расходов"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO misc_expenses_records (file_id, expense_item, amount, is_total)
+                    VALUES (?, ?, ?, ?)
+                """, (file_id, record.get('expense_item'), record.get('amount'),
+                      1 if record.get('is_total') else 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей прочих расходов")
+        except Exception as e:
+            print(f"Ошибка сохранения прочих расходов: {e}")
+            conn.close()
+    
+    def save_taxi_expenses(self, file_id: int, records: list):
+        """Сохранить данные по такси"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO taxi_expenses 
+                    (file_id, taxi_amount, taxi_percent_amount, deposits_total, total_amount)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_id, record.get('taxi_amount', 0), 
+                      record.get('taxi_percent_amount', 0),
+                      record.get('deposits_total', 0),
+                      record.get('total_amount')))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей такси")
+        except Exception as e:
+            print(f"Ошибка сохранения данных такси: {e}")
+            conn.close()
+    
+    def save_cash_collection(self, file_id: int, records: list):
+        """Сохранить данные инкассации"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO cash_collection 
+                    (file_id, currency_label, quantity, exchange_rate, amount, is_total)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (file_id, record.get('currency_label'), record.get('quantity'),
+                      record.get('exchange_rate'), record.get('amount'),
+                      1 if record.get('is_total') else 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей инкассации")
+        except Exception as e:
+            print(f"Ошибка сохранения инкассации: {e}")
+            conn.close()
+    
+    def save_staff_debts(self, file_id: int, records: list):
+        """Сохранить долги по персоналу"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO staff_debts (file_id, debt_type, amount, is_total)
+                    VALUES (?, ?, ?, ?)
+                """, (file_id, record.get('debt_type'), record.get('amount'),
+                      1 if record.get('is_total') else 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} долгов по персоналу")
+        except Exception as e:
+            print(f"Ошибка сохранения долгов по персоналу: {e}")
+            conn.close()
+    
+    def save_notes_entries(self, file_id: int, records: list):
+        """Сохранить примечания"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO notes_entries 
+                    (file_id, category, entry_text, is_total, amount)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_id, record.get('category'), record.get('entry_text'),
+                      1 if record.get('is_total') else 0, record.get('amount')))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей примечаний")
+        except Exception as e:
+            print(f"Ошибка сохранения примечаний: {e}")
+            conn.close()
+    
+    def save_totals_summary(self, file_id: int, records: list):
+        """Сохранить итоговый баланс"""
+        if not records:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for record in records:
+                cursor.execute("""
+                    INSERT INTO totals_summary 
+                    (file_id, payment_type, income_amount, expense_amount, net_profit)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_id, record.get('payment_type'), record.get('income_amount'),
+                      record.get('expense_amount'), record.get('net_profit')))
+            
+            conn.commit()
+            conn.close()
+            print(f"Сохранено {len(records)} записей итогового баланса")
+        except Exception as e:
+            print(f"Ошибка сохранения итогового баланса: {e}")
+            conn.close()
 
