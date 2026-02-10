@@ -253,6 +253,7 @@ def get_owner_menu_keyboard():
     """Клавиатура для владельцев (ограниченный доступ)"""
     keyboard = [
         ['💵 ЗП'],
+        ['📈 ИТОГОВЫЕ ОТЧЁТЫ'],
         ['🚪 ВЫХОД']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -2243,10 +2244,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Команда "ИТОГОВЫЕ ОТЧЁТЫ" (только для админов)
+    # Команда "ИТОГОВЫЕ ОТЧЁТЫ" (для админов и владельцев)
     if text_lower in ['итоговые отчёты', '📈 итоговые отчёты', 'итоговые отчеты', '📈 итоговые отчеты']:
-        if not db.is_admin(user_id):
-            await update.message.reply_text("❌ Доступно только для администраторов")
+        if not db.is_admin(user_id) and not state.owner_mode:
+            await update.message.reply_text("❌ Доступно только для администраторов и владельцев")
             return
         
         # Показываем выбор клуба
@@ -2308,7 +2309,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Обработка ввода даты для итогового отчёта
     if state.mode == 'awaiting_final_report_date_or_period':
-        if not db.is_admin(user_id):
+        if not db.is_admin(user_id) and not state.owner_mode:
             await update.message.reply_text("🔒 Доступ запрещён")
             state.mode = None
             return
@@ -8506,7 +8507,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data.startswith('final_club_select_'):
         # Выбор клуба для итогового отчёта
-        if not db.is_admin(user_id):
+        if not db.is_admin(user_id) and not state.owner_mode:
             await query.answer("🔒 Доступ запрещён", show_alert=True)
             return
         
@@ -8534,7 +8535,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_details':
         # Кнопка "ПОДРОБНЕЕ" - отправить полный Excel со всеми блоками
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8689,7 +8690,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_income':
         # Блок "Доходы"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8712,7 +8713,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_tickets':
         # Блок "Входные билеты"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8741,7 +8742,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_payments':
         # Блок "Типы оплат"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8769,7 +8770,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_staff':
         # Блок "Персонал"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8797,7 +8798,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_expenses':
         # Блок "Расходы"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8825,7 +8826,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_cash':
         # Блок "Инкассация"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8857,7 +8858,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_debts':
         # Блок "Долги персонала"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8885,7 +8886,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_misc':
         # Блок "Прочие расходы"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8913,7 +8914,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_taxi':
         # Блок "Такси"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8946,7 +8947,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_notes':
         # Блок "Примечания"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -8979,7 +8980,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_total_nal':
         # Кнопка "НАЛ"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9022,7 +9023,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_total_bn':
         # Кнопка "Б/Н"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9065,7 +9066,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_total_itogo':
         # Кнопка "Итого прибыль"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9112,7 +9113,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_income':
         # Блок "Доходы"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9150,7 +9151,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_tickets':
         # Блок "Входные билеты"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9187,7 +9188,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_payments':
         # Блок "Типы оплат"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9222,7 +9223,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_staff':
         # Блок "Персонал"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9257,7 +9258,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_expenses':
         # Блок "Расходы"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9292,7 +9293,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_misc':
         # Блок "Прочие расходы"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9327,7 +9328,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_taxi':
         # Блок "Такси"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9364,7 +9365,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_cash':
         # Блок "Инкассация"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9401,7 +9402,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_debts':
         # Блок "Долги персонала"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9436,7 +9437,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_notes':
         # Блок "Примечания"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
@@ -9472,7 +9473,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif query.data == 'final_block_totals':
         # Блок "Итого"
-        if not db.is_admin(user_id) or not state.final_report_file_id:
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.final_report_file_id:
             await query.answer("❌ Ошибка", show_alert=True)
             return
         
