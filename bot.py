@@ -6950,7 +6950,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         # ПАРСИНГ И СОХРАНЕНИЕ ИТОГОВОГО ЛИСТА
         # ============================================
         try:
-            from excel_parser import ExcelProcessor
+            from excel_processor import ExcelProcessor
             
             if not hasattr(state, 'uploaded_file_bytes') or not state.uploaded_file_bytes:
                 print("[WARNING] Файл не сохранён в state, пропускаем парсинг итогового листа")
