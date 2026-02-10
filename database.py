@@ -377,6 +377,21 @@ class Database:
             )
         """)
         
+        # Таблица для расходов вне смены
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS off_shift_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                club_name TEXT NOT NULL,
+                expense_item TEXT NOT NULL,
+                amount REAL NOT NULL,
+                payment_type TEXT NOT NULL DEFAULT 'Наличные',
+                expense_date TEXT DEFAULT (date('now')),
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
         # Индексы для таблиц итогового листа
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_income_records_file_id 
@@ -423,7 +438,25 @@ class Database:
             ON totals_summary(file_id)
         """)
         
-        print("[INFO] Report tables created successfully")
+        # Индексы для таблицы расходов вне смены
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_off_shift_expenses_user_id 
+            ON off_shift_expenses(user_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_off_shift_expenses_club_name 
+            ON off_shift_expenses(club_name)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_off_shift_expenses_date 
+            ON off_shift_expenses(expense_date)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_off_shift_expenses_payment_type 
+            ON off_shift_expenses(payment_type)
+        """)
+        
+        print("[INFO] Report tables created successfully (13 tables)")
         
         conn.commit()
         conn.close()
