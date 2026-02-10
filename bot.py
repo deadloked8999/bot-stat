@@ -7098,6 +7098,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 processor = ExcelProcessor()
                 file_bytes = state.uploaded_file_bytes
                 
+                # Удаляем старые данные итогового листа для этого клуба и даты
+                db.delete_old_report_data(state.payments_upload_club, state.payments_upload_date)
+                
                 # Сохраняем информацию о файле
                 import hashlib
                 file_hash = hashlib.md5(file_bytes).hexdigest()

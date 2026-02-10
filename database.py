@@ -2483,6 +2483,49 @@ class Database:
     # ФУНКЦИИ ДЛЯ РАБОТЫ С ИТОГОВЫМ ЛИСТОМ
     # ============================================
     
+    def delete_old_report_data(self, club_name: str, report_date: str):
+        """Удалить старые данные итогового листа для клуба и даты"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Находим старые file_id для этого клуба и даты
+            cursor.execute("""
+                SELECT id FROM report_files 
+                WHERE club_name = ? AND report_date = ?
+            """, (club_name, report_date))
+            
+            old_file_ids = [row[0] for row in cursor.fetchall()]
+            
+            if old_file_ids:
+                print(f"[INFO] Удаление старых данных итогового листа: {len(old_file_ids)} файлов")
+                
+                # Удаляем данные из всех связанных таблиц
+                for file_id in old_file_ids:
+                    cursor.execute("DELETE FROM income_records WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM ticket_sales WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM payment_types_report WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM staff_statistics WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM expense_records WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM misc_expenses_records WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM taxi_expenses WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM cash_collection WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM staff_debts WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM notes_entries WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM totals_summary WHERE file_id = ?", (file_id,))
+                
+                # Удаляем сами файлы
+                cursor.execute("DELETE FROM report_files WHERE club_name = ? AND report_date = ?", 
+                             (club_name, report_date))
+                
+                conn.commit()
+                print(f"[INFO] Удалено старых данных для {club_name} за {report_date}")
+            
+            conn.close()
+        except Exception as e:
+            print(f"Ошибка удаления старых данных: {e}")
+            conn.close()
+    
     def save_report_file(self, user_id: int, username: str, file_name: str, 
                          file_hash: str, club_name: str, report_date: str, 
                          file_content: bytes) -> int:
