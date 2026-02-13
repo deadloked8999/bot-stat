@@ -1275,63 +1275,25 @@ class Database:
         return added
     
     def get_all_employees(self, club: str) -> List[Dict[str, str]]:
-        """
-        Получить список ВСЕХ уникальных сотрудников для клуба
-        Объединяет данные из employees, operations и payments
-        Нормализует коды для объединения вариантов
-        """
-        from parser import DataParser
-        
+        """Получить всех сотрудников клуба ТОЛЬКО из таблицы employees"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         try:
-            employees_dict = {}  # Ключ: нормализованный код
-            
-            # 1. Из employees (приоритет)
             cursor.execute("""
-                SELECT code, full_name
+                SELECT code, full_name as name
                 FROM employees
                 WHERE club = ?
+                ORDER BY code
             """, (club,))
             
-            for code, name in cursor.fetchall():
-                normalized_code = DataParser.normalize_code(code)
-                # Используем только код как ключ, чтобы объединить варианты
-                if normalized_code not in employees_dict:
-                    employees_dict[normalized_code] = {'code': normalized_code, 'name': name, 'source': 'employees'}
-            
-            # 2. Из operations
-            cursor.execute("""
-                SELECT DISTINCT code, name_snapshot
-                FROM operations
-                WHERE club = ?
-            """, (club,))
-            
-            for code, name in cursor.fetchall():
-                normalized_code = DataParser.normalize_code(code)
-                # Добавляем только если нет в employees
-                if normalized_code not in employees_dict:
-                    employees_dict[normalized_code] = {'code': normalized_code, 'name': name, 'source': 'operations'}
-            
-            # 3. Из payments
-            cursor.execute("""
-                SELECT DISTINCT code, name
-                FROM payments
-                WHERE club = ?
-            """, (club,))
-            
-            for code, name in cursor.fetchall():
-                normalized_code = DataParser.normalize_code(code)
-                # Добавляем только если нет в employees
-                if normalized_code not in employees_dict:
-                    employees_dict[normalized_code] = {'code': normalized_code, 'name': name, 'source': 'payments'}
+            columns = ['code', 'name']
+            results = []
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
             
             conn.close()
-            
-            # Возвращаем список (без информации об источнике)
-            return [{'code': emp['code'], 'name': emp['name']} for emp in employees_dict.values()]
-            
+            return results
         except Exception as e:
             print(f"Ошибка получения сотрудников: {e}")
             conn.close()
