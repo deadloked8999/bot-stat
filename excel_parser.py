@@ -316,13 +316,14 @@ class ExcelProcessor:
             
         except Exception as e:
             logger.error(f"Error reading payments sheet: {e}")
-            return {'payments': [], 'name_changes': []}
+            return {'payments': [], 'name_changes': [], 'new_employees': []}
         
         if df.empty:
-            return {'payments': [], 'name_changes': []}
+            return {'payments': [], 'name_changes': [], 'new_employees': []}
         
         payments = []
         name_changes = []
+        new_employees = []  # Список новых сотрудников для автоматического добавления
         
         # Проходим по строкам (пропускаем первые 2 строки с заголовками)
         for row_idx in range(2, len(df)):
@@ -476,8 +477,13 @@ class ExcelProcessor:
                                 })
                                 # Пока используем имя из файла
                         else:
-                            # Новый сотрудник - ничего не делаем
-                            print(f"DEBUG: New employee: {code} - {name}")
+                            # Новый сотрудник - добавляем в список
+                            print(f"DEBUG: New employee detected: {code} - {name}")
+                            new_employees.append({
+                                'code': code,
+                                'name': name,
+                                'club': club
+                            })
                             
                             # Проверяем operations как fallback
                             existing_names = db.get_employee_names_by_code(club, code)
@@ -537,6 +543,7 @@ class ExcelProcessor:
         
         return {
             'payments': payments,
-            'name_changes': name_changes
+            'name_changes': name_changes,
+            'new_employees': new_employees
         }
 

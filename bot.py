@@ -133,6 +133,7 @@ class UserState:
         self.payments_upload_data: Optional[list] = None
         self.payments_preview_data: Optional[list] = None
         self.payments_name_changes: Optional[list] = None
+        self.payments_new_employees: Optional[list] = None  # Список новых сотрудников для автоматического добавления
         self.name_changes_data: Optional[list] = None
         self.name_changes_index: int = 0
         self.uploaded_file_bytes: Optional[bytes] = None  # Сохранённый файл для парсинга итогового листа
@@ -7172,6 +7173,44 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
             saved_count += 1
         
+        # ============================================
+        # АВТОМАТИЧЕСКОЕ ДОБАВЛЕНИЕ НОВЫХ СОТРУДНИКОВ
+        # ============================================
+        new_employees = getattr(state, 'payments_new_employees', []) or []
+        if new_employees:
+            conn = db.get_connection()
+            cursor = conn.cursor()
+            
+            added_count = 0
+            for emp in new_employees:
+                try:
+                    # Проверяем что сотрудника ещё нет (на всякий случай)
+                    cursor.execute("""
+                        SELECT code FROM employees 
+                        WHERE code = ? AND club = ?
+                    """, (emp['code'], emp['club']))
+                    
+                    if cursor.fetchone() is None:
+                        # Добавляем нового сотрудника
+                        from datetime import datetime
+                        cursor.execute("""
+                            INSERT INTO employees 
+                            (code, club, full_name, hired_date, is_active, created_at)
+                            VALUES (?, ?, ?, ?, 1, ?)
+                        """, (emp['code'], emp['club'], emp['name'], state.payments_upload_date, datetime.now().isoformat()))
+                        
+                        added_count += 1
+                        print(f"[INFO] Добавлен новый сотрудник: {emp['code']} - {emp['name']} ({emp['club']})")
+                
+                except Exception as e:
+                    print(f"[ERROR] Ошибка добавления сотрудника {emp['code']}: {e}")
+            
+            conn.commit()
+            conn.close()
+            
+            if added_count > 0:
+                print(f"[INFO] Автоматически добавлено новых сотрудников: {added_count}")
+        
         # DEBUG: Проверяем что сохранилось
         db.debug_payments(state.payments_upload_club, state.payments_upload_date)
         
@@ -10820,6 +10859,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             payments_data = result['payments']
             name_changes = result['name_changes']
+            new_employees = result.get('new_employees', [])
             
             if not payments_data:
                 await update.message.reply_text(
@@ -10832,6 +10872,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Сохраняем данные в state
             state.payments_preview_data = payments_data
+            state.payments_new_employees = new_employees  # Сохраняем список новых сотрудников
             
             # Если есть изменения имён - показываем предупреждение
             if name_changes:
