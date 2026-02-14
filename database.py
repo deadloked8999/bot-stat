@@ -1339,6 +1339,15 @@ class Database:
                 """, (club, normalized_original_code, emp['name'], normalized_merged_code, main_name, now))
                 print(f"DEBUG: Merge record inserted for {normalized_original_code} - {emp['name']}")
                 
+                # ОБНОВЛЯЕМ ВСЕ ЗАПИСИ В PAYMENTS - меняем имя на главное
+                cursor.execute("""
+                    UPDATE payments
+                    SET name = ?
+                    WHERE club = ? AND code = ?
+                """, (main_name, club, normalized_original_code))
+                payments_updated = cursor.rowcount
+                print(f"DEBUG: Updated {payments_updated} payment names: {emp['name']} → {main_name}")
+                
                 # Получаем все записи из operations
                 cursor.execute("""
                     SELECT date, channel, amount, original_line
