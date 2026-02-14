@@ -9168,11 +9168,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         elif block_type == 'payments':
             lines.insert(0, "💳 ТИПЫ ОПЛАТ")
-            total = 0
+            # НЕ добавляем строку Итого, т.к. в данных уже есть "ИТОГО КАССА" и "ИТОГО"
             for pt, amount in period_summary['payments'].items():
                 lines.append(f"• {pt}: {amount:.0f}")
-                total += amount
-            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'expenses':
             lines.insert(0, "💸 РАСХОДЫ")
