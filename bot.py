@@ -2355,10 +2355,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Проверяем: дата или период?
         if '-' in input_text:
-            # Период (пока не реализовано)
-            await update.message.reply_text("⚠️ Отчёт за период пока не реализован")
-            state.mode = None
-            return
+            # Парсим период
+            period = parse_period_from_text(input_text)
+            
+            if period:
+                # ПЕРИОД (дата-дата)
+                start_date, end_date = period
+                club = state.final_report_club
+                
+                await update.message.reply_text(
+                    f"⏳ Формирую сводный отчёт за период...\n"
+                    f"📅 {format_report_date(start_date)} - {format_report_date(end_date)}\n"
+                    f"🏢 {club}"
+                )
+                
+                # Получаем все файлы за период
+                files = db.get_files_by_period(start_date.isoformat(), end_date.isoformat(), club)
+                
+                if not files:
+                    await update.message.reply_text(
+                        f"📭 Нет данных за период\n"
+                        f"{format_report_date(start_date)} - {format_report_date(end_date)}\n"
+                        f"Клуб: {club}"
+                    )
+                    state.mode = None
+                    return
+                
+                # Пока просто покажем сколько файлов найдено
+                await update.message.reply_text(
+                    f"✅ Найдено файлов: {len(files)}\n"
+                    f"📅 Даты: {format_report_date(start_date)} - {format_report_date(end_date)}\n\n"
+                    f"Генерация сводного отчёта..."
+                )
+                
+                state.mode = None
+                return
+            else:
+                await update.message.reply_text(
+                    f"❌ Неверный формат периода\n\n"
+                    f"Используйте:\n"
+                    f"• 1,1-31,1 или 1.1-31.1"
+                )
+                return
         else:
             # Одна дата - парсим через parse_short_date
             # parse_short_date возвращает tuple (success, date_string, error)
