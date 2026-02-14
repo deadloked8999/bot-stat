@@ -872,15 +872,15 @@ def generate_period_summary(files: List[Dict], club: str, db) -> Dict:
         expense_records = db.list_expense_records(file_id)
         for rec in expense_records:
             if not rec.get('is_total'):
-                category = rec.get('expense_category', '')
-                summary['expenses'][category] += decimal_to_float(rec.get('amount', 0))
+                expense_item = rec.get('expense_item', '')
+                summary['expenses'][expense_item] += decimal_to_float(rec.get('amount', 0))
         
         # 6. Прочие расходы
         misc_records = db.list_misc_expenses_records(file_id)
         for rec in misc_records:
             if not rec.get('is_total'):
-                category = rec.get('category', '')
-                summary['misc_expenses'][category] += decimal_to_float(rec.get('amount', 0))
+                expense_item = rec.get('expense_item', '')
+                summary['misc_expenses'][expense_item] += decimal_to_float(rec.get('amount', 0))
         
         # 7. Такси
         taxi_records = db.list_taxi_expenses(file_id)
@@ -9121,43 +9121,67 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         if block_type == 'income':
             lines.insert(0, "💰 ДОХОДЫ")
+            total = 0
             for cat, amount in period_summary['income'].items():
                 lines.append(f"• {cat}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'tickets':
             lines.insert(0, "🎟 ВХОДНЫЕ БИЛЕТЫ")
+            total = 0
             for label, amount in period_summary['tickets'].items():
                 lines.append(f"• {label}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'payments':
             lines.insert(0, "💳 ТИПЫ ОПЛАТ")
+            total = 0
             for pt, amount in period_summary['payments'].items():
                 lines.append(f"• {pt}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'expenses':
             lines.insert(0, "💸 РАСХОДЫ")
-            for cat, amount in period_summary['expenses'].items():
-                lines.append(f"• {cat}: {amount:.0f}")
+            total = 0
+            for item, amount in period_summary['expenses'].items():
+                lines.append(f"• {item}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'misc':
             lines.insert(0, "📝 ПРОЧИЕ РАСХОДЫ")
-            for cat, amount in period_summary['misc_expenses'].items():
-                lines.append(f"• {cat}: {amount:.0f}")
+            total = 0
+            for item, amount in period_summary['misc_expenses'].items():
+                lines.append(f"• {item}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'taxi':
             lines.insert(0, "🚕 ТАКСИ")
+            total = 0
             for driver, amount in period_summary['taxi'].items():
                 lines.append(f"• {driver}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'cash':
             lines.insert(0, "🏦 ИНКАССАЦИЯ")
+            total = 0
             for type_label, amount in period_summary['cash_collection'].items():
                 lines.append(f"• {type_label}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         elif block_type == 'debts':
             lines.insert(0, "📌 ДОЛГИ ПЕРСОНАЛА")
+            total = 0
             for emp_code, amount in period_summary['debts'].items():
                 lines.append(f"• {emp_code}: {amount:.0f}")
+                total += amount
+            lines.append(f"\n📊 Итого: {total:.0f}")
         
         await query.message.reply_text("\n".join(lines))
         await query.answer()
