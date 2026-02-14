@@ -846,16 +846,15 @@ def generate_period_summary(files: List[Dict], club: str, db) -> Dict:
         income_records = db.list_income_records(file_id)
         for rec in income_records:
             category = rec.get('category', '')
-            # Собираем ВСЕ записи, включая "Итого"
-            if category:
+            if category and 'итого' not in category.lower():
                 summary['income'][category] += decimal_to_float(rec.get('amount', 0))
         
         # 2. Входные билеты
         ticket_records = db.list_ticket_sales(file_id)
         for rec in ticket_records:
-            price_label = rec.get('price_label', '')
-            # Собираем ВСЕ записи, включая итоговые
-            summary['tickets'][price_label] += decimal_to_float(rec.get('amount', 0))
+            if not rec.get('is_total'):
+                price_label = rec.get('price_label', '')
+                summary['tickets'][price_label] += decimal_to_float(rec.get('amount', 0))
         
         # 3. Типы оплат
         payment_records = db.list_payment_types_report(file_id)
@@ -872,16 +871,16 @@ def generate_period_summary(files: List[Dict], club: str, db) -> Dict:
         # 5. Расходы
         expense_records = db.list_expense_records(file_id)
         for rec in expense_records:
-            expense_item = rec.get('expense_item', '')
-            # Собираем ВСЕ записи, включая итоговые
-            summary['expenses'][expense_item] += decimal_to_float(rec.get('amount', 0))
+            if not rec.get('is_total'):
+                expense_item = rec.get('expense_item', '')
+                summary['expenses'][expense_item] += decimal_to_float(rec.get('amount', 0))
         
         # 6. Прочие расходы
         misc_records = db.list_misc_expenses_records(file_id)
         for rec in misc_records:
-            expense_item = rec.get('expense_item', '')
-            # Собираем ВСЕ записи, включая итоговые
-            summary['misc_expenses'][expense_item] += decimal_to_float(rec.get('amount', 0))
+            if not rec.get('is_total'):
+                expense_item = rec.get('expense_item', '')
+                summary['misc_expenses'][expense_item] += decimal_to_float(rec.get('amount', 0))
         
         # 7. Такси
         taxi_records = db.list_taxi_expenses(file_id)
@@ -892,9 +891,9 @@ def generate_period_summary(files: List[Dict], club: str, db) -> Dict:
         # 8. Инкассация
         cash_records = db.list_cash_collection(file_id)
         for rec in cash_records:
-            currency_label = rec.get('currency_label', '')
-            # Собираем ВСЕ записи, включая итоговые
-            summary['cash_collection'][currency_label] += decimal_to_float(rec.get('amount', 0))
+            if not rec.get('is_total'):
+                collection_type = rec.get('collection_type', '')
+                summary['cash_collection'][collection_type] += decimal_to_float(rec.get('amount', 0))
         
         # 9. Долги персонала
         debt_records = db.list_staff_debts(file_id)
