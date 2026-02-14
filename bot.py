@@ -2547,12 +2547,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if row1:
                     keyboard.append(row1)
                 
-                # Второй ряд: Типы оплат, Персонал
+                # Второй ряд: Типы оплат (БЕЗ ПЕРСОНАЛА для периода)
                 row2 = []
                 if payment_total > 0:
                     row2.append(InlineKeyboardButton(f"💳 Оплаты: {payment_total:.0f}", callback_data="final_period_block_payments"))
-                if period_summary['staff_count'] > 0:
-                    row2.append(InlineKeyboardButton(f"👥 Персонал: {period_summary['staff_count']}", callback_data="final_period_block_staff"))
+                # НЕ ПОКАЗЫВАЕМ ПЕРСОНАЛ ДЛЯ ПЕРИОДА
                 if row2:
                     keyboard.append(row2)
                 
@@ -2611,6 +2610,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if itogo_rec:
                         profit = itogo_rec['net_profit']
                         keyboard.append([InlineKeyboardButton(f"📊 Итого прибыль: {profit:.0f}", callback_data="final_period_total_itogo")])
+                
+                # Последний ряд: ПОДРОБНЕЕ (Excel за период)
+                keyboard.append([InlineKeyboardButton("📄 ПОДРОБНЕЕ (Excel)", callback_data="final_period_details")])
                 
                 # Формируем текстовое сообщение
                 summary_lines = []
@@ -9013,6 +9015,205 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             caption=f"📋 ПОЛНЫЙ ОТЧЁТ\n📅 Дата: {date_str}\n🏢 Клуб: {club_name}\n📊 Блоков: {len(all_blocks)}"
         )
         await query.answer("✅ Отчёт отправлен")
+    
+    elif query.data == 'final_period_details':
+        # Кнопка "ПОДРОБНЕЕ" для периода
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.period_summary:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        period_summary = state.period_summary
+        start_date = state.period_start_date
+        end_date = state.period_end_date
+        club = state.period_club
+        
+        all_blocks = {}
+        
+        if period_summary['income']:
+            all_blocks['Доходы'] = [
+                {'Категория': cat, 'Сумма': amount}
+                for cat, amount in period_summary['income'].items()
+            ]
+        
+        if period_summary['tickets']:
+            all_blocks['Входные билеты'] = [
+                {'Цена': label, 'Сумма': amount}
+                for label, amount in period_summary['tickets'].items()
+            ]
+        
+        if period_summary['payments']:
+            all_blocks['Типы оплат'] = [
+                {'Тип оплаты': pt, 'Сумма': amount}
+                for pt, amount in period_summary['payments'].items()
+            ]
+        
+        if period_summary['expenses']:
+            all_blocks['Расходы'] = [
+                {'Статья расходов': cat, 'Сумма': amount}
+                for cat, amount in period_summary['expenses'].items()
+            ]
+        
+        if period_summary['misc_expenses']:
+            all_blocks['Прочие расходы'] = [
+                {'Статья расходов': cat, 'Сумма': amount}
+                for cat, amount in period_summary['misc_expenses'].items()
+            ]
+        
+        if period_summary['taxi']:
+            all_blocks['Такси'] = [
+                {'Водитель': driver, 'Сумма': amount}
+                for driver, amount in period_summary['taxi'].items()
+            ]
+        
+        if period_summary['cash_collection']:
+            all_blocks['Инкассация'] = [
+                {'Тип': type_label, 'Сумма': amount}
+                for type_label, amount in period_summary['cash_collection'].items()
+            ]
+        
+        if period_summary['debts']:
+            all_blocks['Долги персонала'] = [
+                {'Сотрудник': emp_code, 'Сумма': amount}
+                for emp_code, amount in period_summary['debts'].items()
+            ]
+        
+        if period_summary['totals']:
+            all_blocks['Итого'] = [
+                {
+                    'Тип оплаты': rec['payment_type'],
+                    'Доходы': decimal_to_float(rec['income_amount']),
+                    'Расходы': decimal_to_float(rec['expense_amount']),
+                    'Прибыль': decimal_to_float(rec['net_profit'])
+                }
+                for rec in period_summary['totals']
+            ]
+        
+        from excel_processor import ExcelProcessor
+        excel_processor = ExcelProcessor()
+        excel_bytes = excel_processor.export_full_period_report_to_excel(
+            all_blocks, 
+            club, 
+            start_date, 
+            end_date
+        )
+        
+        await query.message.reply_document(
+            excel_bytes, 
+            filename=f"итоговый_отчёт_{club}_{format_report_date(start_date)}-{format_report_date(end_date)}.xlsx",
+            caption=f"📊 ИТОГОВЫЙ ОТЧЁТ\n📅 Период: {format_report_date(start_date)} - {format_report_date(end_date)}\n🏢 Клуб: {club}"
+        )
+        await query.answer("✅ Полный отчёт за период отправлен")
+    
+    elif query.data.startswith('final_period_block_'):
+        # Обработка кнопок блоков для периода
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.period_summary:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        period_summary = state.period_summary
+        start_date = state.period_start_date
+        end_date = state.period_end_date
+        club = state.period_club
+        
+        block_type = query.data.replace('final_period_block_', '')
+        
+        lines = [f"📅 Период: {format_report_date(start_date)} - {format_report_date(end_date)}", f"🏢 Клуб: {club}\n"]
+        
+        if block_type == 'income':
+            lines.insert(0, "💰 ДОХОДЫ")
+            for cat, amount in period_summary['income'].items():
+                lines.append(f"• {cat}: {amount:.0f}")
+        
+        elif block_type == 'tickets':
+            lines.insert(0, "🎟 ВХОДНЫЕ БИЛЕТЫ")
+            for label, amount in period_summary['tickets'].items():
+                lines.append(f"• {label}: {amount:.0f}")
+        
+        elif block_type == 'payments':
+            lines.insert(0, "💳 ТИПЫ ОПЛАТ")
+            for pt, amount in period_summary['payments'].items():
+                lines.append(f"• {pt}: {amount:.0f}")
+        
+        elif block_type == 'expenses':
+            lines.insert(0, "💸 РАСХОДЫ")
+            for cat, amount in period_summary['expenses'].items():
+                lines.append(f"• {cat}: {amount:.0f}")
+        
+        elif block_type == 'misc':
+            lines.insert(0, "📝 ПРОЧИЕ РАСХОДЫ")
+            for cat, amount in period_summary['misc_expenses'].items():
+                lines.append(f"• {cat}: {amount:.0f}")
+        
+        elif block_type == 'taxi':
+            lines.insert(0, "🚕 ТАКСИ")
+            for driver, amount in period_summary['taxi'].items():
+                lines.append(f"• {driver}: {amount:.0f}")
+        
+        elif block_type == 'cash':
+            lines.insert(0, "🏦 ИНКАССАЦИЯ")
+            for type_label, amount in period_summary['cash_collection'].items():
+                lines.append(f"• {type_label}: {amount:.0f}")
+        
+        elif block_type == 'debts':
+            lines.insert(0, "📌 ДОЛГИ ПЕРСОНАЛА")
+            for emp_code, amount in period_summary['debts'].items():
+                lines.append(f"• {emp_code}: {amount:.0f}")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
+    
+    elif query.data.startswith('final_period_total_'):
+        # Обработка кнопок итогов для периода
+        if (not db.is_admin(user_id) and not state.owner_mode) or not state.period_summary:
+            await query.answer("❌ Ошибка", show_alert=True)
+            return
+        
+        period_summary = state.period_summary
+        start_date = state.period_start_date
+        end_date = state.period_end_date
+        club = state.period_club
+        
+        total_type = query.data.replace('final_period_total_', '')
+        
+        lines = [f"📅 Период: {format_report_date(start_date)} - {format_report_date(end_date)}", f"🏢 Клуб: {club}\n"]
+        
+        target_rec = None
+        if total_type == 'nal':
+            for rec in period_summary['totals']:
+                payment_type = rec['payment_type'].lower()
+                if 'нал' in payment_type and 'безнал' not in payment_type and 'б/н' not in payment_type:
+                    target_rec = rec
+                    break
+            if target_rec:
+                lines.insert(0, "💵 НАЛИЧНЫЕ")
+        
+        elif total_type == 'bn':
+            for rec in period_summary['totals']:
+                payment_type = rec['payment_type'].lower()
+                if 'б/н' in payment_type or 'безнал' in payment_type:
+                    target_rec = rec
+                    break
+            if target_rec:
+                lines.insert(0, "💳 БЕЗНАЛИЧНЫЕ")
+        
+        elif total_type == 'itogo':
+            for rec in period_summary['totals']:
+                payment_type = rec['payment_type'].lower()
+                if 'итого' in payment_type:
+                    target_rec = rec
+                    break
+            if target_rec:
+                lines.insert(0, "📊 ИТОГО")
+        
+        if target_rec:
+            lines.append(f"💰 Доходы: {decimal_to_float(target_rec['income_amount']):.0f}")
+            lines.append(f"💸 Расходы: {decimal_to_float(target_rec['expense_amount']):.0f}")
+            lines.append(f"📈 Прибыль: {decimal_to_float(target_rec['net_profit']):.0f}")
+        else:
+            lines.append("⚠️ Нет данных")
+        
+        await query.message.reply_text("\n".join(lines))
+        await query.answer()
     
     # ============================================
     # ОБРАБОТЧИКИ БЛОКОВ ИТОГОВОГО ОТЧЁТА
