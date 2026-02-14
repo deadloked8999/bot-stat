@@ -9029,53 +9029,85 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         all_blocks = {}
         
+        # 1. Доходы
         if period_summary['income']:
-            all_blocks['Доходы'] = [
+            income_rows = [
                 {'Категория': cat, 'Сумма': amount}
                 for cat, amount in period_summary['income'].items()
             ]
+            total = sum(period_summary['income'].values())
+            income_rows.append({'Категория': 'ИТОГО', 'Сумма': total})
+            all_blocks['Доходы'] = income_rows
         
+        # 2. Входные билеты
         if period_summary['tickets']:
-            all_blocks['Входные билеты'] = [
+            ticket_rows = [
                 {'Цена': label, 'Сумма': amount}
                 for label, amount in period_summary['tickets'].items()
             ]
+            total = sum(period_summary['tickets'].values())
+            ticket_rows.append({'Цена': 'ИТОГО', 'Сумма': total})
+            all_blocks['Входные билеты'] = ticket_rows
         
+        # 3. Типы оплат
         if period_summary['payments']:
-            all_blocks['Типы оплат'] = [
+            payment_rows = [
                 {'Тип оплаты': pt, 'Сумма': amount}
                 for pt, amount in period_summary['payments'].items()
             ]
+            total = sum(period_summary['payments'].values())
+            payment_rows.append({'Тип оплаты': 'ИТОГО', 'Сумма': total})
+            all_blocks['Типы оплат'] = payment_rows
         
+        # 4. Расходы
         if period_summary['expenses']:
-            all_blocks['Расходы'] = [
-                {'Статья расходов': cat, 'Сумма': amount}
-                for cat, amount in period_summary['expenses'].items()
+            expense_rows = [
+                {'Статья расходов': item, 'Сумма': amount}
+                for item, amount in period_summary['expenses'].items()
             ]
+            total = sum(period_summary['expenses'].values())
+            expense_rows.append({'Статья расходов': 'ИТОГО', 'Сумма': total})
+            all_blocks['Расходы'] = expense_rows
         
+        # 5. Прочие расходы
         if period_summary['misc_expenses']:
-            all_blocks['Прочие расходы'] = [
-                {'Статья расходов': cat, 'Сумма': amount}
-                for cat, amount in period_summary['misc_expenses'].items()
+            misc_rows = [
+                {'Статья расходов': item, 'Сумма': amount}
+                for item, amount in period_summary['misc_expenses'].items()
             ]
+            total = sum(period_summary['misc_expenses'].values())
+            misc_rows.append({'Статья расходов': 'ИТОГО', 'Сумма': total})
+            all_blocks['Прочие расходы'] = misc_rows
         
+        # 6. Такси
         if period_summary['taxi']:
-            all_blocks['Такси'] = [
+            taxi_rows = [
                 {'Водитель': driver, 'Сумма': amount}
                 for driver, amount in period_summary['taxi'].items()
             ]
+            total = sum(period_summary['taxi'].values())
+            taxi_rows.append({'Водитель': 'ИТОГО', 'Сумма': total})
+            all_blocks['Такси'] = taxi_rows
         
+        # 7. Инкассация
         if period_summary['cash_collection']:
-            all_blocks['Инкассация'] = [
+            cash_rows = [
                 {'Тип': type_label, 'Сумма': amount}
                 for type_label, amount in period_summary['cash_collection'].items()
             ]
+            total = sum(period_summary['cash_collection'].values())
+            cash_rows.append({'Тип': 'ИТОГО', 'Сумма': total})
+            all_blocks['Инкассация'] = cash_rows
         
+        # 8. Долги персонала
         if period_summary['debts']:
-            all_blocks['Долги персонала'] = [
+            debt_rows = [
                 {'Сотрудник': emp_code, 'Сумма': amount}
                 for emp_code, amount in period_summary['debts'].items()
             ]
+            total = sum(period_summary['debts'].values())
+            debt_rows.append({'Сотрудник': 'ИТОГО', 'Сумма': total})
+            all_blocks['Долги персонала'] = debt_rows
         
         if period_summary['totals']:
             all_blocks['Итого'] = [
