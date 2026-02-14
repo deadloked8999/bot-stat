@@ -2486,12 +2486,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 start_date, end_date = period
                 club = state.final_report_club
                 
-                await update.message.reply_text(
-                    f"⏳ Формирую сводный отчёт за период...\n"
-                    f"📅 {format_report_date(start_date)} - {format_report_date(end_date)}\n"
-                    f"🏢 {club}"
-                )
-                
                 # Получаем все файлы за период
                 files = db.get_files_by_period(start_date.isoformat(), end_date.isoformat(), club)
                 
@@ -2504,8 +2498,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     state.mode = None
                     return
                 
-                # Генерируем сводный отчёт за период
-                period_summary = generate_period_summary(files, club, db)
+                # Отправляем промежуточное сообщение
+                processing_msg = await update.message.reply_text(
+                    f"⏳ Обработка {len(files)} файлов...\n"
+                    f"📅 {format_report_date(start_date)} - {format_report_date(end_date)}\n"
+                    f"🏢 {club}"
+                )
+                
+                try:
+                    # Генерируем сводный отчёт за период
+                    period_summary = generate_period_summary(files, club, db)
+                except Exception as e:
+                    print(f"ERROR: generate_period_summary failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    await processing_msg.edit_text(
+                        f"❌ Ошибка при генерации отчёта\n\n"
+                        f"Попробуйте позже или выберите меньший период."
+                    )
+                    state.mode = None
+                    return
                 
                 # Сохраняем в state для callback обработчиков
                 state.period_summary = period_summary
@@ -2605,6 +2617,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 summary_lines.append(f"📅 Период: {format_report_date(start_date)} - {format_report_date(end_date)}")
                 summary_lines.append(f"🏢 Клуб: {club}")
                 summary_lines.append(f"📊 Файлов: {len(files)}")
+                
+                # Удаляем промежуточное сообщение и отправляем итоговое
+                try:
+                    await processing_msg.delete()
+                except:
+                    pass
                 
                 await update.message.reply_text(
                     "\n".join(summary_lines),
