@@ -159,6 +159,12 @@ class UserState:
         self.final_report_file_id: Optional[int] = None
         self.final_report_club: Optional[str] = None
         
+        # Для отчётов за период
+        self.period_summary: Optional[dict] = None
+        self.period_start_date: Optional[date] = None
+        self.period_end_date: Optional[date] = None
+        self.period_club: Optional[str] = None
+        
         # ID сообщений бота для удаления
         self.bot_messages: list = []
     
@@ -803,6 +809,123 @@ def parse_report_date_from_text(text: str):
 def format_report_date(d: date) -> str:
     """Форматирование даты в строку DD.MM.YYYY"""
     return d.strftime("%d.%m.%Y")
+
+
+def generate_period_summary(files: List[Dict], club: str, db) -> Dict:
+    """
+    Генерация сводного отчёта за период - суммирование всех блоков
+    
+    Args:
+        files: список файлов за период (каждый с file_id)
+        club: название клуба
+        db: экземпляр Database
+    
+    Returns:
+        словарь с детализацией всех блоков и итогами
+    """
+    from collections import defaultdict
+    
+    summary = {
+        'income': defaultdict(float),  # {category: total_amount}
+        'tickets': defaultdict(float),  # {price_label: total_amount}
+        'payments': defaultdict(float),  # {payment_type: total_amount}
+        'expenses': defaultdict(float),  # {expense_category: total_amount}
+        'misc_expenses': defaultdict(float),  # {category: total_amount}
+        'taxi': defaultdict(float),  # {description: total_amount}
+        'cash_collection': defaultdict(float),  # {type: total_amount}
+        'debts': defaultdict(float),  # {employee_name: total_amount}
+        'staff_count': 0,  # общее количество персонала
+        'totals': []  # итоги по типам оплат
+    }
+    
+    # Собираем данные из всех файлов
+    for file in files:
+        file_id = file['id']
+        
+        # 1. Доходы
+        income_records = db.list_income_records(file_id)
+        for rec in income_records:
+            category = rec.get('category', '')
+            if category and 'итого' not in category.lower():
+                summary['income'][category] += decimal_to_float(rec.get('amount', 0))
+        
+        # 2. Входные билеты
+        ticket_records = db.list_ticket_sales(file_id)
+        for rec in ticket_records:
+            if not rec.get('is_total'):
+                price_label = rec.get('price_label', '')
+                summary['tickets'][price_label] += decimal_to_float(rec.get('amount', 0))
+        
+        # 3. Типы оплат
+        payment_records = db.list_payment_types_report(file_id)
+        for rec in payment_records:
+            if not rec.get('is_total'):
+                payment_type = rec.get('payment_type', '')
+                summary['payments'][payment_type] += decimal_to_float(rec.get('amount', 0))
+        
+        # 4. Персонал
+        staff_records = db.list_staff_statistics(file_id)
+        for rec in staff_records:
+            summary['staff_count'] += rec.get('staff_count', 0)
+        
+        # 5. Расходы
+        expense_records = db.list_expense_records(file_id)
+        for rec in expense_records:
+            if not rec.get('is_total'):
+                category = rec.get('expense_category', '')
+                summary['expenses'][category] += decimal_to_float(rec.get('amount', 0))
+        
+        # 6. Прочие расходы
+        misc_records = db.list_misc_expenses_records(file_id)
+        for rec in misc_records:
+            if not rec.get('is_total'):
+                category = rec.get('category', '')
+                summary['misc_expenses'][category] += decimal_to_float(rec.get('amount', 0))
+        
+        # 7. Такси
+        taxi_records = db.list_taxi_expenses(file_id)
+        for rec in taxi_records:
+            description = rec.get('description', '')
+            summary['taxi'][description] += decimal_to_float(rec.get('total_amount', 0))
+        
+        # 8. Инкассация
+        cash_records = db.list_cash_collection(file_id)
+        for rec in cash_records:
+            if not rec.get('is_total'):
+                collection_type = rec.get('collection_type', '')
+                summary['cash_collection'][collection_type] += decimal_to_float(rec.get('amount', 0))
+        
+        # 9. Долги персонала
+        debt_records = db.list_staff_debts(file_id)
+        for rec in debt_records:
+            if not rec.get('is_total'):
+                employee_name = rec.get('employee_name', '')
+                summary['debts'][employee_name] += decimal_to_float(rec.get('amount', 0))
+        
+        # 10. Итого (суммируем по типам оплат)
+        total_records = db.list_totals_summary(file_id)
+        for rec in total_records:
+            payment_type = rec.get('payment_type', '')
+            # Ищем существующую запись или создаём новую
+            existing = None
+            for t in summary['totals']:
+                if t['payment_type'] == payment_type:
+                    existing = t
+                    break
+            
+            if existing:
+                existing['income_amount'] += decimal_to_float(rec.get('income_amount', 0))
+                existing['expense_amount'] += decimal_to_float(rec.get('expense_amount', 0))
+                existing['net_profit'] += decimal_to_float(rec.get('net_profit', 0))
+            else:
+                summary['totals'].append({
+                    'payment_type': payment_type,
+                    'income_amount': decimal_to_float(rec.get('income_amount', 0)),
+                    'expense_amount': decimal_to_float(rec.get('expense_amount', 0)),
+                    'net_profit': decimal_to_float(rec.get('net_profit', 0))
+                })
+    
+    return summary
 
 
 def decimal_to_str(value) -> str:
@@ -2381,11 +2504,111 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     state.mode = None
                     return
                 
-                # Пока просто покажем сколько файлов найдено
+                # Генерируем сводный отчёт за период
+                period_summary = generate_period_summary(files, club, db)
+                
+                # Сохраняем в state для callback обработчиков
+                state.period_summary = period_summary
+                state.period_start_date = start_date
+                state.period_end_date = end_date
+                state.period_club = club
+                
+                # Вычисляем итоги для отображения
+                income_total = sum(period_summary['income'].values())
+                ticket_total = sum(period_summary['tickets'].values())
+                payment_total = sum(period_summary['payments'].values())
+                expense_total = sum(period_summary['expenses'].values())
+                misc_total = sum(period_summary['misc_expenses'].values())
+                taxi_total = sum(period_summary['taxi'].values())
+                cash_total = sum(period_summary['cash_collection'].values())
+                debt_total = sum(period_summary['debts'].values())
+                
+                # Формируем инлайн-клавиатуру с блоками
+                keyboard = []
+                
+                # Первый ряд: Доходы, Билеты
+                row1 = []
+                if income_total > 0:
+                    row1.append(InlineKeyboardButton(f"💰 Доходы: {income_total:.0f}", callback_data="final_period_block_income"))
+                if ticket_total > 0:
+                    row1.append(InlineKeyboardButton(f"🎟 Билеты: {ticket_total:.0f}", callback_data="final_period_block_tickets"))
+                if row1:
+                    keyboard.append(row1)
+                
+                # Второй ряд: Типы оплат, Персонал
+                row2 = []
+                if payment_total > 0:
+                    row2.append(InlineKeyboardButton(f"💳 Оплаты: {payment_total:.0f}", callback_data="final_period_block_payments"))
+                if period_summary['staff_count'] > 0:
+                    row2.append(InlineKeyboardButton(f"👥 Персонал: {period_summary['staff_count']}", callback_data="final_period_block_staff"))
+                if row2:
+                    keyboard.append(row2)
+                
+                # Третий ряд: Расходы, Инкассация
+                row3 = []
+                if expense_total > 0:
+                    row3.append(InlineKeyboardButton(f"💸 Расходы: {expense_total:.0f}", callback_data="final_period_block_expenses"))
+                if cash_total > 0:
+                    row3.append(InlineKeyboardButton(f"🏦 Инкассация: {cash_total:.0f}", callback_data="final_period_block_cash"))
+                if row3:
+                    keyboard.append(row3)
+                
+                # Четвёртый ряд: Долги, Прочие расходы
+                row4 = []
+                if debt_total > 0:
+                    row4.append(InlineKeyboardButton(f"📌 Долги: {debt_total:.0f}", callback_data="final_period_block_debts"))
+                if misc_total > 0:
+                    row4.append(InlineKeyboardButton(f"📝 Прочие: {misc_total:.0f}", callback_data="final_period_block_misc"))
+                if row4:
+                    keyboard.append(row4)
+                
+                # Пятый ряд: Такси
+                row5 = []
+                if taxi_total > 0:
+                    row5.append(InlineKeyboardButton(f"🚕 Такси: {taxi_total:.0f}", callback_data="final_period_block_taxi"))
+                if row5:
+                    keyboard.append(row5)
+                
+                # Добавляем итоги как кнопки (НАЛ, Б/Н, Итого прибыль)
+                if period_summary['totals']:
+                    nal_rec = None
+                    bn_rec = None
+                    itogo_rec = None
+                    
+                    for rec in period_summary['totals']:
+                        payment_type = rec['payment_type'].lower()
+                        if 'нал' in payment_type and 'безнал' not in payment_type and 'б/н' not in payment_type:
+                            nal_rec = rec
+                        elif 'б/н' in payment_type or 'безнал' in payment_type:
+                            bn_rec = rec
+                        elif 'итого' in payment_type:
+                            itogo_rec = rec
+                    
+                    # Ряд с НАЛ и Б/Н
+                    row_totals = []
+                    if nal_rec:
+                        profit = nal_rec['net_profit']
+                        row_totals.append(InlineKeyboardButton(f"💵 НАЛ: {profit:.0f}", callback_data="final_period_total_nal"))
+                    if bn_rec:
+                        profit = bn_rec['net_profit']
+                        row_totals.append(InlineKeyboardButton(f"💳 Б/Н: {profit:.0f}", callback_data="final_period_total_bn"))
+                    if row_totals:
+                        keyboard.append(row_totals)
+                    
+                    # Ряд с Итого прибыль
+                    if itogo_rec:
+                        profit = itogo_rec['net_profit']
+                        keyboard.append([InlineKeyboardButton(f"📊 Итого прибыль: {profit:.0f}", callback_data="final_period_total_itogo")])
+                
+                # Формируем текстовое сообщение
+                summary_lines = []
+                summary_lines.append(f"📅 Период: {format_report_date(start_date)} - {format_report_date(end_date)}")
+                summary_lines.append(f"🏢 Клуб: {club}")
+                summary_lines.append(f"📊 Файлов: {len(files)}")
+                
                 await update.message.reply_text(
-                    f"✅ Найдено файлов: {len(files)}\n"
-                    f"📅 Даты: {format_report_date(start_date)} - {format_report_date(end_date)}\n\n"
-                    f"Генерация сводного отчёта..."
+                    "\n".join(summary_lines),
+                    reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
                 )
                 
                 state.mode = None
