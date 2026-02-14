@@ -2528,7 +2528,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Вычисляем итоги для отображения
                 income_total = sum(period_summary['income'].values())
                 ticket_total = sum(period_summary['tickets'].values())
-                payment_total = sum(period_summary['payments'].values())
+                
+                # Для типов оплат берём значение из записи "ИТОГО", а не суммируем всё
+                payment_total = 0
+                for pt, amount in period_summary['payments'].items():
+                    if 'итого' in pt.lower() and 'касса' not in pt.lower():
+                        payment_total = amount
+                        break
+                
                 expense_total = sum(period_summary['expenses'].values())
                 misc_total = sum(period_summary['misc_expenses'].values())
                 taxi_total = sum(period_summary['taxi'].values())
