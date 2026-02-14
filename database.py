@@ -1323,14 +1323,21 @@ class Database:
         now = datetime.now().isoformat()
         
         try:
+            from parser import DataParser
+            
             for emp in employees_to_merge:
-                print(f"DEBUG: Processing employee: {emp['code']} - {emp['name']}")
+                # Нормализуем коды перед сохранением
+                normalized_original_code = DataParser.normalize_code(emp['code'])
+                normalized_merged_code = DataParser.normalize_code(main_code)
+                
+                print(f"DEBUG: Processing employee: {emp['code']} → {normalized_original_code}")
+                
                 # Записываем объединение в таблицу employee_merges
                 cursor.execute("""
                     INSERT INTO employee_merges (club, original_code, original_name, merged_code, merged_name, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (club, emp['code'], emp['name'], main_code, main_name, now))
-                print(f"DEBUG: Merge record inserted for {emp['code']} - {emp['name']}")
+                """, (club, normalized_original_code, emp['name'], normalized_merged_code, main_name, now))
+                print(f"DEBUG: Merge record inserted for {normalized_original_code} - {emp['name']}")
                 
                 # Получаем все записи из operations
                 cursor.execute("""
