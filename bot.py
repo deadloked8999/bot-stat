@@ -9035,7 +9035,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Категория': cat, 'Сумма': amount}
                 for cat, amount in period_summary['income'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['income'].values())
+            income_rows.append({'Категория': 'ИТОГО', 'Сумма': total})
             all_blocks['Доходы'] = income_rows
         
         # 2. Входные билеты
@@ -9044,7 +9045,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Цена': label, 'Сумма': amount}
                 for label, amount in period_summary['tickets'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['tickets'].values())
+            ticket_rows.append({'Цена': 'ИТОГО', 'Сумма': total})
             all_blocks['Входные билеты'] = ticket_rows
         
         # 3. Типы оплат
@@ -9053,7 +9055,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Тип оплаты': pt, 'Сумма': amount}
                 for pt, amount in period_summary['payments'].items()
             ]
-            # Итоговые строки уже есть в данных (Итого касса, Итого)
+            # НЕ добавляем ИТОГО - там уже есть "Итого касса" и "Итого"
             all_blocks['Типы оплат'] = payment_rows
         
         # 4. Расходы
@@ -9062,7 +9064,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Статья расходов': item, 'Сумма': amount}
                 for item, amount in period_summary['expenses'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['expenses'].values())
+            expense_rows.append({'Статья расходов': 'ИТОГО', 'Сумма': total})
             all_blocks['Расходы'] = expense_rows
         
         # 5. Прочие расходы
@@ -9071,7 +9074,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Статья расходов': item, 'Сумма': amount}
                 for item, amount in period_summary['misc_expenses'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['misc_expenses'].values())
+            misc_rows.append({'Статья расходов': 'ИТОГО', 'Сумма': total})
             all_blocks['Прочие расходы'] = misc_rows
         
         # 6. Такси
@@ -9080,7 +9084,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Водитель': driver, 'Сумма': amount}
                 for driver, amount in period_summary['taxi'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['taxi'].values())
+            taxi_rows.append({'Водитель': 'ИТОГО', 'Сумма': total})
             all_blocks['Такси'] = taxi_rows
         
         # 7. Инкассация
@@ -9089,7 +9094,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Тип': type_label, 'Сумма': amount}
                 for type_label, amount in period_summary['cash_collection'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['cash_collection'].values())
+            cash_rows.append({'Тип': 'ИТОГО', 'Сумма': total})
             all_blocks['Инкассация'] = cash_rows
         
         # 8. Долги персонала
@@ -9098,7 +9104,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 {'Сотрудник': emp_code, 'Сумма': amount}
                 for emp_code, amount in period_summary['debts'].items()
             ]
-            # Итоговая строка уже есть в данных
+            total = sum(period_summary['debts'].values())
+            debt_rows.append({'Сотрудник': 'ИТОГО', 'Сумма': total})
             all_blocks['Долги персонала'] = debt_rows
         
         if period_summary['totals']:
